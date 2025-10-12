@@ -204,7 +204,7 @@ void draw_header() {
     box(header_win, 0, 0);
     
     std::string status = is_playing ? "▶" : "⏸";
-    mvwprintw(header_win, 1, 2, "%s Now Playing: %s", status.c_str(), current_title.c_str());
+    mvwprintw(header_win, 1, 2, "%s Now Watching: %s", status.c_str(), current_title.c_str());
     
     wrefresh(header_win);
 }
@@ -226,6 +226,11 @@ void draw_main() {
         if (!status_message.empty()) {
             mvwprintw(main_win, 4, 2, "%s", status_message.c_str());
         }
+        
+        mvwprintw(main_win, 6, 2, "Tips:");
+        mvwprintw(main_win, 7, 4, "- Search for any video, channel, or topic");
+        mvwprintw(main_win, 8, 4, "- Results are played with mpv (no ads, no tracking)");
+        mvwprintw(main_win, 9, 4, "- Build your own YouTube experience");
         
         curs_set(1);
         wmove(main_win, 2, 4 + search_query.length());
@@ -263,10 +268,11 @@ void draw_main() {
             }
         } else {
             // Playlist mode
-            mvwprintw(main_win, 1, 2, "Playlist (%zu tracks)", playlist.size());
+            mvwprintw(main_win, 1, 2, "Watch Queue (%zu videos)", playlist.size());
             
             if (playlist.empty()) {
-                mvwprintw(main_win, 3, 4, "Empty playlist. Press '/' to search YouTube.");
+                mvwprintw(main_win, 3, 4, "No videos in queue.");
+                mvwprintw(main_win, 4, 4, "Press '/' to search YouTube and start watching.");
             } else {
                 // Adjust scroll offset
                 if (current_selection < scroll_offset) {
@@ -315,9 +321,9 @@ void draw_footer() {
     if (current_mode == UIMode::SEARCH_INPUT) {
         hints = "Type to search | ENTER: search | ESC: cancel";
     } else if (current_mode == UIMode::SEARCH_RESULTS) {
-        hints = "j/k: navigate | ENTER: play now | A: add to queue | a: add all | ESC: back | q: quit";
+        hints = "j/k: navigate | ENTER: watch now | A: add to queue | a: add all | ESC: back | q: quit";
     } else {
-        hints = "/: search | j/k: move | ENTER: play | p: pause | h/l: prev/next | +/-: volume | d: delete | s: save | q: quit";
+        hints = "/: search | j/k: move | ENTER: watch | p: pause | h/l: prev/next | +/-: volume | d: delete | s: save | q: quit";
     }
     
     mvwprintw(footer_win, 0, 2, "%s", hints.c_str());
@@ -380,29 +386,62 @@ bool handle_input() {
         } else if (ch == '\n' || ch == '\r' || ch == KEY_ENTER) {
             if (current_selection < search_results.size()) {
                 Video selected = search_results[current_selection];
-                playlist.insert(playlist.begin(), selected);
-                mpv.play_video(playlist[0].url);
-                current_playing = 0;
-                current_title = playlist[0].title;
-                is_playing = true;
-                add_to_history(selected);
-                save_playlist();
-                current_selection = 0;
-                scroll_offset = 0;
-                status_message = "Now playing: " + selected.title;
+                
+                // Check if video already exists in playlist
+                auto it = std::find_if(playlist.begin(), playlist.end(), 
+                    [&selected](const Video& v) { return v.video_id == selected.video_id; });
+                
+                if (it != playlist.end()) {
+                    // Video exists, play it
+                    size_t existing_idx = std::distance(playlist.begin(), it);
+                    mpv.play_video(playlist[existing_idx].url);
+                    current_playing = static_cast<int>(existing_idx);
+                    current_title = playlist[existing_idx].title;
+                    is_playing = true;
+                    add_to_history(selected);
+                    status_message = "Now playing: " + selected.title;
+                } else {
+                    // New video, insert at top
+                    playlist.insert(playlist.begin(), selected);
+                    mpv.play_video(playlist[0].url);
+                    current_playing = 0;
+                    current_title = playlist[0].title;
+                    is_playing = true;
+                    add_to_history(selected);
+                    save_playlist();
+                    status_message = "Now playing: " + selected.title;
+                }
             }
         } else if (ch == 'A') {
             if (current_selection < search_results.size()) {
-                playlist.push_back(search_results[current_selection]);
-                save_playlist();
-                status_message = "Added to playlist";
+                Video selected = search_results[current_selection];
+                
+                // Check if video already exists
+                auto it = std::find_if(playlist.begin(), playlist.end(), 
+                    [&selected](const Video& v) { return v.video_id == selected.video_id; });
+                
+                if (it == playlist.end()) {
+                    playlist.push_back(selected);
+                    save_playlist();
+                    status_message = "Added to playlist";
+                } else {
+                    status_message = "Already in playlist";
+                }
             }
         } else if (ch == 'a') {
+            int added_count = 0;
             for (const auto& video : search_results) {
-                playlist.push_back(video);
+                // Check if video already exists
+                auto it = std::find_if(playlist.begin(), playlist.end(), 
+                    [&video](const Video& v) { return v.video_id == video.video_id; });
+                
+                if (it == playlist.end()) {
+                    playlist.push_back(video);
+                    added_count++;
+                }
             }
             save_playlist();
-            status_message = "Added all " + std::to_string(search_results.size()) + " videos";
+            status_message = "Added " + std::to_string(added_count) + " new videos";
         } else if (ch == 27) { // ESC
             current_mode = UIMode::PLAYLIST;
             current_selection = 0;
@@ -429,12 +468,12 @@ bool handle_input() {
             current_title = playlist[current_selection].title;
             is_playing = true;
             add_to_history(playlist[current_selection]);
-            status_message = "Playing: " + current_title;
+            status_message = "Watching: " + current_title;
         }
     } else if (ch == 'p' || ch == ' ') {
         mpv.toggle_pause();
         is_playing = !is_playing;
-        status_message = is_playing ? "Playing" : "Paused";
+        status_message = is_playing ? "Resumed" : "Paused";
     } else if (ch == 'l') {
         mpv.next_track();
         if (current_playing < static_cast<int>(playlist.size()) - 1) {
@@ -467,7 +506,7 @@ bool handle_input() {
         }
     } else if (ch == 's') {
         save_playlist();
-        status_message = "Playlist saved";
+        status_message = "Watch queue saved";
     } else if (ch == '/') {
         current_mode = UIMode::SEARCH_INPUT;
         search_query = "";
@@ -479,7 +518,9 @@ bool handle_input() {
     return true;
 }
 
+// Start MPV daemon
 void start_mpv() {
+    // Start mpv with video support for full YouTube experience
     std::string cmd = "mpv --idle --input-ipc-server=" + MPV_SOCKET + " --really-quiet >/dev/null 2>&1 &";
     system(cmd.c_str());
     sleep(1);

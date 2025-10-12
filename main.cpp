@@ -19,7 +19,7 @@ struct Video {
 
 // Global state
 std::vector<Video> playlist;
-int current_selection = 0;
+size_t current_selection = 0;
 int current_playing = -1;
 bool is_playing = false;
 std::string current_title = "No track playing";
@@ -114,7 +114,7 @@ void draw_ui() {
         if (i == current_selection) {
             attron(A_REVERSE);
         }
-        if (i == current_playing) {
+        if (static_cast<int>(i) == current_playing) {
             mvprintw(4 + i, 4, "▶ %s", playlist[i].title.c_str());
         } else {
             mvprintw(4 + i, 4, "  %s", playlist[i].title.c_str());
@@ -136,7 +136,7 @@ bool handle_input() {
     
     switch (ch) {
         case 'j':
-            if (current_selection < (int)playlist.size() - 1) {
+            if (current_selection < playlist.size() - 1) {
                 current_selection++;
             }
             break;
@@ -149,9 +149,9 @@ bool handle_input() {
             
         case '\n': // ENTER
         case '\r':
-            if (current_selection >= 0 && current_selection < (int)playlist.size()) {
+            if (current_selection < playlist.size()) {
                 mpv.play_video(playlist[current_selection].url);
-                current_playing = current_selection;
+                current_playing = static_cast<int>(current_selection);
                 current_title = playlist[current_selection].title;
                 is_playing = true;
             }
@@ -164,7 +164,7 @@ bool handle_input() {
             
         case 'l':
             mpv.next_track();
-            if (current_playing < (int)playlist.size() - 1) {
+            if (current_playing < static_cast<int>(playlist.size()) - 1) {
                 current_playing++;
                 current_title = playlist[current_playing].title;
             }

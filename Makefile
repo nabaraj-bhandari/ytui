@@ -1,29 +1,26 @@
-# Makefile for ytui (intermediate structure)
+# Makefile for ytui
 # See config.h for configuration
 
-# Compiler and flags
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -Wextra -pedantic -O2
 LDFLAGS = -lncurses -lpthread
-
-# Executable name
 TARGET = ytui
-
-# Source file
-SRC = ytui.cpp
-
-# Prefix for installation
+SRCS = ytui.cpp ui.cpp process.cpp youtube.cpp files.cpp
+OBJS = $(SRCS:.cpp=.o)
 PREFIX = /usr/local
 
 .PHONY: all clean install uninstall
 
 all: $(TARGET)
 
-$(TARGET): $(SRC)
-	$(CXX) $(CXXFLAGS) $(SRC) -o $(TARGET) $(LDFLAGS)
+$(TARGET): $(OBJS)
+	$(CXX) $(OBJS) -o $(TARGET) $(LDFLAGS)
+
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) $(OBJS)
 
 install: all
 	@echo installing executable to $(PREFIX)/bin

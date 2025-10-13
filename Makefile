@@ -1,18 +1,26 @@
-# Makefile for ytui (tiny ncurses YouTube search player)
 CXX = g++
-CXXFLAGS = -std=c++17 -O2 -Wall -Wextra
-LDFLAGS = -lncurses
+CXXFLAGS = -std=c++17 -Wall -Wextra -O2
+LIBS = -lncurses
 
 TARGET = ytui
-SRC = ytui.cpp
+SRC = main.cpp
+BUILD_DIR = build
 
-.PHONY: all clean
+all: $(BUILD_DIR) $(BUILD_DIR)/$(TARGET)
 
-all: $(TARGET)
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
 
-$(TARGET): $(SRC)
-	$(CXX) $(CXXFLAGS) -o $@ $< $(LDFLAGS)
+$(BUILD_DIR)/$(TARGET): $(SRC)
+	$(CXX) $(CXXFLAGS) -o $@ $(SRC) $(LIBS)
 
 clean:
-	-rm -f $(TARGET)
+	rm -rf $(BUILD_DIR)
 
+install: all
+	cp $(BUILD_DIR)/$(TARGET) /usr/local/bin/
+
+uninstall:
+	rm -f /usr/local/bin/$(TARGET)
+
+.PHONY: all clean install uninstall

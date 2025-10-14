@@ -13,6 +13,8 @@ int main() {
     mkdirs();
     load_search_hist();
     load_history();
+    load_channel_cache();
+    load_video_meta();
     signal(SIGPIPE, SIG_IGN);
     init_ui();
     bool run = true;

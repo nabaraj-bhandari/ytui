@@ -1,5 +1,6 @@
 #include "types.h"
 #include <thread>
+#include <map>
 
 // Global state definitions
 std::vector<std::string> search_hist;
@@ -15,7 +16,12 @@ time_t status_time = 0;
 Focus focus = HOME;
 bool insert_mode = false;
 size_t query_pos = 0;
-bool show_help = false;
 int subs_channel_idx = -1;
 std::vector<std::vector<Video>> subs_cache;
+int search_hist_idx = -1;
+std::vector<Video> channel_videos;
+std::string channel_name;
+std::string channel_url;
+// channel cache: key -> channel_url
+std::map<std::string, std::string> channel_cache;
 

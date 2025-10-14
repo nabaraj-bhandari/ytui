@@ -1,15 +1,20 @@
+// Project headers
 #include "ui.h"
 #include "config.h"
 #include "types.h"
 #include "youtube.h"
 #include "utils.h"
+
+// Standard / system headers
+#include <locale.h>
+#include <ncurses.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <ncurses.h>
-#include <locale.h>
 #include <ctime>
 #include <algorithm>
+
+// Use global MAX_LIST_ITEMS from config.h
 
 void init_ui() {
     setlocale(LC_ALL, "");
@@ -20,10 +25,10 @@ void init_ui() {
     init_pair(2, COLOR_BLACK, COLOR_CYAN);
     init_pair(3, COLOR_GREEN, -1);
     init_pair(4, COLOR_MAGENTA, -1);
-    cbreak(); 
-    noecho(); 
-    keypad(stdscr, TRUE); 
-    nodelay(stdscr, TRUE); 
+    cbreak();
+    noecho();
+    keypad(stdscr, TRUE);
+    nodelay(stdscr, TRUE);
     curs_set(1); // Set cursor visibility to 1 for better visibility
 }
 
@@ -54,52 +59,39 @@ static void draw_statusline() {
     int h, w;
     getmaxyx(stdscr, h, w);
     int y = h - 1;
-    
+
     move(y, 0);
     clrtoeol();
-    
-    // Mode indicator
-    const char* mode_str;
-    int color;
-    
-    if (focus == SEARCH && insert_mode) {
-        mode_str = "INSERT";
-        color = COLOR_PAIR(3) | A_BOLD;
-    } else {
-        mode_str = "NORMAL";
-        color = COLOR_PAIR(1) | A_BOLD;
-    }
-    
-    attron(color);
-    mvprintw(y, 0, " %s ", mode_str);
-    attroff(color);
-    
-    // Status message
-    if (time(nullptr) - status_time < 3 && !status_msg.empty()) {
-        attron(A_DIM);
-        mvprintw(y, 12, "%s", status_msg.c_str());
-        attroff(A_DIM);
-    }
 
-    // Key hints
-    std::string hints;
+    // Key hints (mode+hints on left)
+    std::string left;
     switch (focus) {
-        case HOME: hints = "a:Home  s:Search  d:Downloads  w:Subs"; break;
-        case SEARCH: hints = insert_mode ? "ESC:Exit insert  Enter:Run" : "i:Insert 1-9:Quick"; break;
-        case RESULTS: hints = "Enter:Play  D:Download"; break;
-        case DOWNLOADS: hints = "Enter:Play local"; break;
-        case PROFILE: hints = "Enter:Play"; break;
-        case SUBSCRIPTIONS: hints = "r:Refresh  Enter:Open channel"; break;
+        case HOME: left = "a:Home s:Search d:Downloads w:Subs"; break;
+        case SEARCH: left = insert_mode ? "TAB:Toggle Enter:Search" : "TAB:Toggle j/k:Up/Down"; break;
+        case RESULTS: left = "Enter=Play D=Download"; break;
+        case CHANNEL: left = "Enter=Play D=Download S=ToggleSub"; break;
+        case DOWNLOADS: left = "Enter=Play D=Download"; break;
+        case PROFILE: left = "Enter=Play D=Download"; break;
+        case SUBSCRIPTIONS: left = "r=Refresh Enter=Open"; break;
     }
 
-    if (!hints.empty()) {
+    if (!left.empty()) {
         attron(A_DIM);
-        mvprintw(y, w - hints.length() - 2, "%s", hints.c_str());
+        mvprintw(y, 2, "%s", left.c_str());
         attroff(A_DIM);
+    }
+
+    // Short-lived info on the right
+    if (time(nullptr) - status_time < 3 && !status_msg.empty()) {
+        attron(A_BOLD);
+        int start = w - (int)status_msg.length() - 2;
+        if (start < (int)left.length() + 4) start = (int)left.length() + 4; // avoid overlap
+        mvprintw(y, start, "%s", status_msg.c_str());
+        attroff(A_BOLD);
     }
 
     // Compact info
-    int info_x = 8;
+    int info_x = w/2;
     std::string info;
     if (focus == DOWNLOADS) {
         int total = 0, active = 0;
@@ -138,20 +130,16 @@ static void draw_section(int y, int h, const std::string &title,
     for (int i = title.length() + 5; i < w; i++) addch('-');
     attroff(COLOR_PAIR(1) | A_BOLD | A_DIM);
 
-    for (size_t i = 0; i < items.size() && i < (size_t)h; i++) {
+    size_t max_display = visible_count((size_t)h, items.size());
+    for (size_t i = 0; i < max_display; i++) {
         size_t idx = i + offset;
         if (idx >= items.size()) break;
 
         bool selected = active && sel == idx;
         if (selected) attron(A_REVERSE | A_BOLD);
 
-        std::string prefix = "  ";
-        if (&items == &history)
-            prefix = (idx == 0) ? "> " : "  ";
-        else if (&items == &res) {
-            // Check if the video is downloaded by id or title-based filename
-            prefix = is_video_downloaded(items[idx]) ? "* " : "o ";
-        }
+        // Mark downloaded videos with '*' and non-downloaded with 'o' for all video lists
+        std::string prefix = is_video_downloaded(items[idx]) ? "* " : "o ";
 
         mvprintw(y + 1 + i, 0, "%s", prefix.c_str());
         std::string num = std::to_string(idx + 1) + ". ";
@@ -167,6 +155,81 @@ static void draw_section(int y, int h, const std::string &title,
     }
 }
 
+// Draw the search UI (header, input box, recent searches)
+static void draw_search_ui() {
+    const int box_x = 4;
+    const std::string label = "SEARCH: ";
+
+    if (insert_mode) {
+        attron(A_BOLD | COLOR_PAIR(1));
+        mvprintw(3, box_x, "%s%s", label.c_str(), query.c_str());
+        attroff(A_BOLD | COLOR_PAIR(1));
+        int cx = box_x + (int)label.length() + (int)query_pos;
+        move(3, cx);
+        curs_set(1);
+    } else {
+        attron(A_DIM);
+        mvprintw(3, box_x, "%s%s", label.c_str(), query.c_str());
+        attroff(A_DIM);
+        curs_set(0);
+    }
+
+    // recent searches
+    mvprintw(5, box_x, "RECENT SEARCHES: ");
+    for (size_t i = 0; i < search_hist.size() && i < 10; i++) {
+        int row = 6 + i;
+        bool selh = (search_hist_idx == (int)i) && !insert_mode;
+        if (selh) attron(A_REVERSE | A_BOLD);
+        mvprintw(row, box_x + 2, "%2zu. %s", i + 1, search_hist[i].c_str());
+        if (selh) attroff(A_REVERSE | A_BOLD);
+    }
+}
+
+// Draw downloads list and overlay file sizes
+static void draw_downloads_ui(int h, int w) {
+    auto vids = get_download_items();
+    draw_section(2, h - 4, "DOWNLOADS", vids, true, 0);
+
+    size_t display_count = visible_count((size_t)h - 4, vids.size());
+    for (size_t i = 0; i < display_count; ++i) {
+        const auto &v = vids[i];
+        struct stat st{};
+        if (stat(v.path.c_str(), &st) == 0 && st.st_size > 0) {
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%5.1fMB", (double)st.st_size / (1024 * 1024));
+            mvprintw(3 + i, w - 9, "%s", buf);
+        }
+    }
+}
+
+// Draw subscriptions list or the cached channel videos for a subscription
+static void draw_subscriptions_ui(int h, int w) {
+    if (subs.empty()) load_subs();
+
+    auto draw_channel_list = [&](void) {
+        std::vector<Video> dummy;
+        draw_section(2, h - 4, "SUBSCRIPTIONS", dummy, true, 0);
+        size_t display_count = visible_count((size_t)h - 4, subs.size());
+        for (size_t i = 0; i < display_count; ++i) {
+            bool selch = (sel == i);
+            if (selch) attron(A_REVERSE | A_BOLD);
+            std::string name = subs[i].name.empty() ? subs[i].url : subs[i].name;
+            if ((int)name.size() > w - 8)
+                name = name.substr(0, w - 11) + "...";
+            mvprintw(3 + i, 2, "%2zu. %s", i + 1, name.c_str());
+            if (selch) attroff(A_REVERSE | A_BOLD);
+        }
+    };
+
+    if (subs_channel_idx < 0)
+        draw_channel_list();
+    else if (subs_cache.size() > (size_t)subs_channel_idx && !subs_cache[subs_channel_idx].empty())
+        draw_section(2, h - 4, "CHANNEL: " + subs[subs_channel_idx].name,
+                     subs_cache[subs_channel_idx], true, 0);
+    else
+        mvprintw(4, 4, "No videos loaded for this channel.");
+}
+
 void draw() {
     clear();
     int h, w;
@@ -175,69 +238,24 @@ void draw() {
     if (focus == HOME) {
         std::string logo = "YTUI";
         mvprintw(3, (w - (int)logo.length()) / 2, "%s", logo.c_str());
-        attron(A_BOLD);
-        mvprintw(6, 4, "Keys:");
-        attroff(A_BOLD);
-        mvprintw(8, 6, "Shift+H: Home  Shift+F: Search  Shift+D: Downloads");
-        mvprintw(9, 6, "Shift+S: Subscriptions  Shift+P: Profile");
-        mvprintw(10, 6, "d: Download selected in Results  Enter: Play selected");
-    } 
+    }
     else if (focus == SEARCH) {
-        mvprintw(3, 4, "Search: %s", query.c_str());
-        if (insert_mode) {
-            int cx = 4 + 8 + (int)query_pos;
-            move(3, cx);
-            curs_set(1);
-        } else {
-            curs_set(0);
-        }
-        mvprintw(5, 4, "Recent: ");
-        for (size_t i = 0; i < search_hist.size() && i < 5; i++)
-            mvprintw(6 + i, 6, "%zu. %s", i + 1, search_hist[i].c_str());
-        mvprintw(11, 6, "r   : Refresh subscriptions (on Subscriptions page)");
+        draw_search_ui();
     }
     else if (focus == DOWNLOADS) {
-        auto vids = get_download_items();
-        draw_section(2, h - 4, "DOWNLOADS", vids, true, 0);
-
-        // overlay file sizes
-        for (size_t i = 0; i < vids.size() && i < (size_t)h - 4; ++i) {
-            const auto &v = vids[i];
-            struct stat st{};
-            if (stat(v.path.c_str(), &st) == 0 && st.st_size > 0) {
-                char buf[16];
-                snprintf(buf, sizeof(buf), "%5.1fMB", (double)st.st_size / (1024 * 1024));
-                mvprintw(3 + i, w - 9, "%s", buf);
-            }
-        }
+        draw_downloads_ui(h, w);
     }
     else if (focus == SUBSCRIPTIONS) {
-        if (subs.empty()) load_subs();
-
-        auto draw_channel_list = [&](void) {
-            std::vector<Video> dummy;
-            draw_section(2, h - 4, "SUBSCRIPTIONS", dummy, true, 0);
-            for (size_t i = 0; i < subs.size() && i < (size_t)h - 4; ++i) {
-                bool selch = (sel == i);
-                if (selch) attron(A_REVERSE | A_BOLD);
-                std::string name = subs[i].name.empty() ? subs[i].url : subs[i].name;
-                if ((int)name.size() > w - 8)
-                    name = name.substr(0, w - 11) + "...";
-                mvprintw(3 + i, 2, "%2zu. %s", i + 1, name.c_str());
-                if (selch) attroff(A_REVERSE | A_BOLD);
-            }
-        };
-
-        if (subs_channel_idx < 0)
-            draw_channel_list();
-        else if (subs_cache.size() > (size_t)subs_channel_idx && !subs_cache[subs_channel_idx].empty())
-            draw_section(2, h - 4, "CHANNEL: " + subs[subs_channel_idx].name,
-                         subs_cache[subs_channel_idx], true, 0);
-        else
-            mvprintw(4, 4, "No videos loaded. Press Enter to load latest 10 videos for this channel.");
+        draw_subscriptions_ui(h, w);
     }
     else if (focus == RESULTS) {
         draw_section(2, h - 4, "RESULTS", res, focus == RESULTS, 0);
+    }
+    else if (focus == CHANNEL) {
+        draw_section(2, h - 4, "CHANNEL: " + channel_name, channel_videos, true, 0);
+        bool is_sub = is_subscribed(channel_url, channel_name);
+        std::string badge = is_sub ? "[SUB]" : "[+SUB]";
+        mvprintw(2, getmaxx(stdscr) - (int)badge.length() - 2, "%s", badge.c_str());
     }
     else if (focus == PROFILE) {
         draw_section(2, h - 4, "PROFILE - History", history, focus == PROFILE, 0);
@@ -246,45 +264,34 @@ void draw() {
     refresh_download_statuses();
     draw_statusline();
 
-    if (show_help) {
-        int hh = 10, ww = 50;
-        int y0 = (h - hh) / 2, x0 = (w - ww) / 2;
-        attron(A_DIM);
-        for (int y = 1; y < h - 1; ++y)
-            for (int x = 1; x < w - 1; ++x)
-                mvaddch(y, x, ' ');
-        attroff(A_DIM);
-        mvaddch(y0, x0, ACS_ULCORNER);
-        mvhline(y0, x0 + 1, ACS_HLINE, ww - 2);
-        mvaddch(y0, x0 + ww - 1, ACS_URCORNER);
-        mvvline(y0 + 1, x0, ACS_VLINE, hh - 2);
-        mvvline(y0 + 1, x0 + ww - 1, ACS_VLINE, hh - 2);
-        mvaddch(y0 + hh - 1, x0, ACS_LLCORNER);
-        mvhline(y0 + hh - 1, x0 + 1, ACS_HLINE, ww - 2);
-        mvaddch(y0 + hh - 1, x0 + ww - 1, ACS_LRCORNER);
-        attron(A_BOLD);
-        mvprintw(y0 + 1, x0 + 2, "YTUI Help");
-        attroff(A_BOLD);
-        mvprintw(y0 + 3, x0 + 2, "a:Home   s:Search   D:Downloads");
-        mvprintw(y0 + 4, x0 + 2, "w:Subscriptions   p:Profile");
-        mvprintw(y0 + 6, x0 + 2, "In Search: i=insert, ESC=exit, Enter=run");
-        mvprintw(y0 + 7, x0 + 2, "Results: Enter=play, d=download, I=info");
-    }
     refresh();
 }
 
 bool handle_input() {
-    int ch = getch(); 
+    int ch = getch();
     if(ch == ERR) return true;
 
     // Global quit
     if(ch == APP_KEY_QUIT) return false;
 
+    if (!(focus == SEARCH && insert_mode)) {
+        if (ch == 'j' || ch == 'J') ch = APP_KEY_DOWN;
+        else if (ch == 'k' || ch == 'K') ch = APP_KEY_UP;
+        else if (ch == 'l' || ch == 'L') ch = '\n';
+        else if (ch == 'h' || ch == 'H') ch = 27; // ESC / back
+    }
+
     // Mode-specific actions
     if(focus != SEARCH) {
-        if(ch == APP_KEY_RELATED) { show_related(); return true; }
-        if(ch == APP_KEY_COPY) { copy_url(); return true; }
-        if(ch == APP_KEY_CHANNEL) { show_channel(); return true; }
+        if(ch == APP_KEY_CHANNEL) {
+            if(focus == RESULTS && sel < res.size()) { show_channel_for(res[sel]); }
+            else if(focus == PROFILE && sel < history.size()) { show_channel_for(history[sel]); }
+            else if(focus == DOWNLOADS) {
+                auto items = get_download_items();
+                if(sel < items.size()) show_channel_for(items[sel]);
+            }
+            return true;
+        }
         // allow refresh of subscriptions listing
         if(ch == 'r' && focus == SUBSCRIPTIONS && subs_channel_idx >= 0) {
             if(subs_cache.size() > (size_t)subs_channel_idx) {
@@ -294,8 +301,7 @@ bool handle_input() {
             return true;
         }
     }
-    
-    // Direct single-letter jumps — but do not trigger while user is typing in Search insert mode
+
     if(!(focus == SEARCH && insert_mode)) {
         if(ch == APP_KEY_SUBS) { focus = SUBSCRIPTIONS; sel = 0; return true; }
         if(ch == APP_KEY_DOWNLOADS) { focus = DOWNLOADS; sel = 0; return true; }
@@ -303,41 +309,43 @@ bool handle_input() {
         if(ch == APP_KEY_HOME) { focus = HOME; sel = 0; return true; }
         if(ch == APP_KEY_SEARCH) { focus = SEARCH; sel = 0; return true; }
     }
-    
+
     // Handle input based on focus
     if(focus == SEARCH) {
+        if(ch == '\t') { insert_mode = !insert_mode; query_pos = query.size(); curs_set(insert_mode ? 1 : 0); return true; }
+
         if(!insert_mode) {
-            // enter insert mode only with literal 'i'
-            if(ch == 'i') { insert_mode = true; query_pos = query.size(); return true; }
-            // quick history selection in normal search mode
-            if(ch >= '1' && ch <= '9' && query.empty()) {
-                int i = ch - '1';
-                if(i < (int)search_hist.size()) {
-                    query = search_hist[i];
-                    res = fetch_videos(query);
-                    add_search_hist(query);
-                    if(!res.empty()) { focus = RESULTS; sel = 0; }
-                }
+            // navigate recent search list
+            if((ch == APP_KEY_DOWN || ch == KEY_DOWN) && !search_hist.empty()) {
+                if(search_hist_idx < (int)search_hist.size() - 1) search_hist_idx++;
+                else search_hist_idx = 0;
+                return true;
+            }
+            if((ch == APP_KEY_UP || ch == KEY_UP) && !search_hist.empty()) {
+                if(search_hist_idx > 0) search_hist_idx--;
+                else search_hist_idx = (int)search_hist.size() - 1;
                 return true;
             }
             if(ch == '\n' || ch == '\r') {
+                if(search_hist_idx >= 0 && search_hist_idx < (int)search_hist.size()) {
+                    query = search_hist[search_hist_idx];
+                }
                 if(!query.empty()) {
-                  res = fetch_videos(query, 30);
+                  res = fetch_videos(query, MAX_LIST_ITEMS);
                   add_search_hist(query);
                   focus = RESULTS; sel = 0;
                 }
                 return true;
             }
         } else {
-            // insert mode: ESC to exit, Enter to run and exit, cursored editing
-            if(ch == 27) { insert_mode = false; return true; }
+            // insert mode: Enter to run and exit, cursored editing
             if(ch == '\n' || ch == '\r') {
                 if(!query.empty()) {
-                  res = fetch_videos(query, 30);
+                  res = fetch_videos(query, MAX_LIST_ITEMS);
                   add_search_hist(query);
                   focus = RESULTS; sel = 0;
                 }
-                insert_mode = false;
+                insert_mode = false; curs_set(0);
                 return true;
             }
             // left/right movement
@@ -353,17 +361,32 @@ bool handle_input() {
         else if((ch == '\n' || ch == '\r') && sel < res.size()) play(res[sel]);
         else if(ch == APP_KEY_DOWNLOAD && sel < res.size()) {
             const Video &v = res[sel];
-            mkdir(VIDEO_CACHE.c_str(), 0755);
-            int pid = download(v);
-            Download dl2; dl2.v = v; dl2.pid = pid; dl2.done = false; dl2.v.path = VIDEO_CACHE + "/" + v.id + ".mkv";
-            downloads.insert(downloads.begin(), dl2);
-            set_status("Downloading: " + v.title);
+            enqueue_download(v);
         }
-        
+
     } else if(focus == PROFILE) {
         if(ch == APP_KEY_DOWN && sel < history.size() - 1) sel++;
         else if(ch == APP_KEY_UP && sel > 0) sel--;
         else if((ch == '\n' || ch == '\r') && sel < history.size()) play(history[sel]);
+        else if(ch == APP_KEY_DOWNLOAD && sel < history.size()) {
+            const Video &v = history[sel];
+            enqueue_download(v);
+        }
+    }
+    else if (focus == CHANNEL) {
+        if (channel_videos.empty()) return true;
+        if((ch == APP_KEY_DOWN || ch == KEY_DOWN) && sel < channel_videos.size() - 1) sel++;
+        else if((ch == APP_KEY_UP || ch == KEY_UP) && sel > 0) sel--;
+        else if(ch == 27) { // ESC back to subscriptions
+            focus = SUBSCRIPTIONS; sel = 0; subs_channel_idx = -1; return true;
+        }
+        else if((ch == '\n' || ch == '\r') && sel < channel_videos.size()) play(channel_videos[sel]);
+        else if(ch == APP_KEY_DOWNLOAD && sel < channel_videos.size()) enqueue_download(channel_videos[sel]);
+        else if(ch == APP_KEY_SUB_TOGGLE) {
+            bool now_sub = toggle_subscription(channel_name, channel_url);
+            set_status(now_sub ? std::string("Subscribed: ") + channel_name : std::string("Unsubscribed: ") + channel_name);
+            return true;
+        }
     }
     else if (focus == DOWNLOADS) {
         auto items = get_download_items();
@@ -373,6 +396,8 @@ bool handle_input() {
             const auto &v = items[sel];
             if (file_exists(v.path)) play(v);
             else play(v); // fallback to remote stream
+        } else if (ch == APP_KEY_DOWNLOAD && sel < items.size()) {
+            enqueue_download(items[sel]);
         }
     }
     else if(focus == SUBSCRIPTIONS) {
@@ -395,9 +420,11 @@ bool handle_input() {
             }
             else if((ch == '\n' || ch == '\r') && subs_cache.size() > (size_t)subs_channel_idx && sel < subs_cache[subs_channel_idx].size()) {
                 play(subs_cache[subs_channel_idx][sel]);
+            } else if (ch == APP_KEY_DOWNLOAD && subs_cache.size() > (size_t)subs_channel_idx && sel < subs_cache[subs_channel_idx].size()) {
+                enqueue_download(subs_cache[subs_channel_idx][sel]);
             }
         }
     }
-    
+
     return true;
 }

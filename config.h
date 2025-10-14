@@ -12,17 +12,18 @@ inline const std::string HISTORY_FILE = CACHE_DIR + "/history.txt";
 inline const std::string SEARCH_HISTORY_FILE = CACHE_DIR + "/search_history.txt";
 inline const std::string MPV_SOCK = "/tmp/mpvsocket";
 inline const std::string SUBS_FILE = CONFIG_DIR + "/subscriptions";
+inline const std::string CHANNEL_CACHE_FILE = CACHE_DIR + "/channel_cache.txt";
+inline const std::string VIDEO_META_FILE = CACHE_DIR + "/video_meta.txt";
 
 // MPV & yt-dlp configuration
-inline const char* MPV_ARGS = "--fs --ytdl-format='137+234/136+234/399+234/398+234/232+234/270+234/609+234/614+234/248+234/247+234/135+233/134+233/best'";
+inline const char* MPV_ARGS = "--fs --ytdl-raw-options=no-check-certificates=,http-chunk-size=0 --ytdl-format='137+234/136+234/399+234/398+234/232+234/270+234/609+234/614+234/248+234/247+234/135+233/134+233/best'";
 inline const char* YTDL_FMT = "137+234/136+234/399+234/398+234/232+234/270+234/609+234/614+234/248+234/247+234/135+233/134+233/best";
 
 // Key bindings (minimal defaults)
 static const int APP_KEY_QUIT = 'Q';
-static const int APP_KEY_RELATED = 'r';
 static const int APP_KEY_DOWNLOAD = 'D';
-static const int APP_KEY_COPY = 'y';
 static const int APP_KEY_CHANNEL = 'c';
+static const int APP_KEY_SUB_TOGGLE = 'S'; 
 static const int APP_KEY_HOME = 'a';
 static const int APP_KEY_SEARCH = 's';
 static const int APP_KEY_DOWNLOADS = 'd';
@@ -30,6 +31,8 @@ static const int APP_KEY_SUBS = 'w';
 static const int APP_KEY_PROFILE = 'p';
 static const int APP_KEY_DOWN = 'j';
 static const int APP_KEY_UP = 'k';
+
+static const int MAX_LIST_ITEMS = 30;
 
 #endif
 

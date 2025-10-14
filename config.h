@@ -14,13 +14,12 @@ inline const std::string MPV_SOCK = "/tmp/mpvsocket";
 inline const std::string SUBS_FILE = CONFIG_DIR + "/subscriptions";
 
 // MPV & yt-dlp configuration
-inline const char* MPV_ARGS = "--really-quiet";
+inline const char* MPV_ARGS = "--fs --ytdl-format='137+234/136+234/399+234/398+234/232+234/270+234/609+234/614+234/248+234/247+234/135+233/134+233/best'";
 inline const char* YTDL_FMT = "137+234/136+234/399+234/398+234/232+234/270+234/609+234/614+234/248+234/247+234/135+233/134+233/best";
 
 // Key bindings (minimal defaults)
 static const int APP_KEY_QUIT = 'Q';
 static const int APP_KEY_RELATED = 'r';
-static const int APP_KEY_DESC = 'I';
 static const int APP_KEY_DOWNLOAD = 'D';
 static const int APP_KEY_COPY = 'y';
 static const int APP_KEY_CHANNEL = 'c';

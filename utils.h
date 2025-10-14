@@ -29,6 +29,12 @@ void save_subs();
 // Scan the VIDEO_CACHE directory and return discovered videos
 std::vector<Video> scan_video_cache();
 
+// Return true if the given video appears in the VIDEO_CACHE (match by id or title)
+bool is_video_downloaded(const Video &v);
+
+// Return path to cached file for given video id, or empty string if not present
+std::string find_cached_path_by_id(const std::string &id);
+
 // Utility encoding for safe persistence
 std::string esc(const std::string &s);
 std::string unesc(const std::string &s);

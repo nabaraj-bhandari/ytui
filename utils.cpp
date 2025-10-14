@@ -1,4 +1,13 @@
+#include <string>
 #include "utils.h"
+// Return path to cached file for given video id, or empty string if not present
+std::string find_cached_path_by_id(const std::string &id) {
+    auto cached = scan_video_cache();
+    for(const auto &v : cached) {
+        if(v.id == id) return v.path;
+    }
+    return std::string();
+}
 #include "config.h"
 #include "types.h"
 #include "youtube.h"
@@ -30,7 +39,8 @@ void set_status(const std::string &msg) {
 }
 
 void play(const Video &v) {
-    std::string path = file_exists(v.path) ? v.path : "https://www.youtube.com/watch?v=" + v.id;
+    std::string local_path = find_cached_path_by_id(v.id);
+    std::string path = !local_path.empty() ? local_path : "https://www.youtube.com/watch?v=" + v.id;
     std::string cmd = "setsid mpv ";
     cmd += std::string(MPV_ARGS) + " '" + path + "' </dev/null >/dev/null 2>&1 &";
     system(cmd.c_str());
@@ -134,45 +144,18 @@ std::vector<Video> scan_video_cache() {
         std::string ext = name.substr(dot + 1);
         if (ext != "mkv" && ext != "mp4") continue;
 
-        std::string id = name.substr(0, dot);
+        std::string base = name.substr(0, dot);
         Video v;
-        v.id = id;
         v.path = VIDEO_CACHE + "/" + name;
 
-        // Load title from history if available
-        auto it = std::find_if(history.begin(), history.end(),
-            [&](const Video &h){ return h.id == id; });
-        if (it != history.end()) v.title = it->title;
-        else v.title = id; // fallback
-
-        // Try to read metadata JSON file (<id>.info.json)
-        std::string info_path = VIDEO_CACHE + "/" + id + ".info.json";
-        FILE *f = fopen(info_path.c_str(), "r");
-        if (f) {
-            fseek(f, 0, SEEK_END);
-            long size = ftell(f);
-            fseek(f, 0, SEEK_SET);
-            std::string buf(size, '\0');
-            fread(&buf[0], 1, size, f);
-            fclose(f);
-
-            // crude string extraction for small footprint
-            auto find_field = [&](const char *key) -> std::string {
-                std::string k = "\"" + std::string(key) + "\":";
-                size_t pos = buf.find(k);
-                if (pos == std::string::npos) return "";
-                pos = buf.find('"', pos + k.size());
-                if (pos == std::string::npos) return "";
-                size_t end = buf.find('"', pos + 1);
-                if (end == std::string::npos) return "";
-                return buf.substr(pos + 1, end - pos - 1);
-            };
-
-            std::string title = find_field("title");
-            std::string channel = find_field("channel_url");
-
-            if (!title.empty()) v.title = title;
-            if (!channel.empty()) v.channel_url = channel;
+        // Expect filename format: <title><id> where id is 11 chars at the end
+        if (base.size() >= 11) {
+            v.id = base.substr(base.size() - 11);
+            v.title = base.substr(0, base.size() - 11);
+        } else {
+            // fallback: use whole base as id
+            v.id = base;
+            v.title = base;
         }
 
         out.push_back(v);
@@ -180,6 +163,15 @@ std::vector<Video> scan_video_cache() {
 
     closedir(d);
     return out;
+}
+
+// Check if a video is present in the cache. Match by id first; if not, try a title-based match.
+bool is_video_downloaded(const Video &v) {
+    auto cached = scan_video_cache();
+    for(const auto &c : cached) {
+        if(c.id == v.id) return true;
+    }
+    return false;
 }
 
 

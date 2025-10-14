@@ -149,12 +149,8 @@ static void draw_section(int y, int h, const std::string &title,
         if (&items == &history)
             prefix = (idx == 0) ? "> " : "  ";
         else if (&items == &res) {
-            // Check if the video is downloaded by ID, not by stored path
-            static auto cached = scan_video_cache(); // small optimization, optional
-            bool downloaded = std::any_of(
-                cached.begin(), cached.end(),
-                [&](const Video &c){ return c.id == items[idx].id; });
-            prefix = downloaded ? "* " : "o ";
+            // Check if the video is downloaded by id or title-based filename
+            prefix = is_video_downloaded(items[idx]) ? "* " : "o ";
         }
 
         mvprintw(y + 1 + i, 0, "%s", prefix.c_str());
@@ -287,7 +283,6 @@ bool handle_input() {
     // Mode-specific actions
     if(focus != SEARCH) {
         if(ch == APP_KEY_RELATED) { show_related(); return true; }
-        if(ch == APP_KEY_DESC) { show_description(); return true; }
         if(ch == APP_KEY_COPY) { copy_url(); return true; }
         if(ch == APP_KEY_CHANNEL) { show_channel(); return true; }
         // allow refresh of subscriptions listing
@@ -327,12 +322,9 @@ bool handle_input() {
             }
             if(ch == '\n' || ch == '\r') {
                 if(!query.empty()) {
-                    if(query == "/trending") show_trending();
-                    else {
-                        res = fetch_videos(query, 30);
-                        add_search_hist(query);
-                        focus = RESULTS; sel = 0;
-                    }
+                  res = fetch_videos(query, 30);
+                  add_search_hist(query);
+                  focus = RESULTS; sel = 0;
                 }
                 return true;
             }
@@ -341,12 +333,9 @@ bool handle_input() {
             if(ch == 27) { insert_mode = false; return true; }
             if(ch == '\n' || ch == '\r') {
                 if(!query.empty()) {
-                    if(query == "/trending") show_trending();
-                    else {
-                        res = fetch_videos(query, 30);
-                        add_search_hist(query);
-                        focus = RESULTS; sel = 0;
-                    }
+                  res = fetch_videos(query, 30);
+                  add_search_hist(query);
+                  focus = RESULTS; sel = 0;
                 }
                 insert_mode = false;
                 return true;
@@ -354,11 +343,8 @@ bool handle_input() {
             // left/right movement
             if(ch == KEY_LEFT) { if(query_pos > 0) query_pos--; return true; }
             if(ch == KEY_RIGHT) { if(query_pos < query.size()) query_pos++; return true; }
-            // backspace (delete before cursor)
             if(ch == KEY_BACKSPACE || ch == 127 || ch == 8) { if(query_pos > 0) { query.erase(query_pos - 1, 1); query_pos--; } return true; }
-            // delete at cursor
             if(ch == KEY_DC) { if(query_pos < query.size()) query.erase(query_pos, 1); return true; }
-            // printable chars: insert at cursor
             if(ch >= 32 && ch <= 126) { query.insert(query_pos, 1, (char)ch); query_pos++; return true; }
         }
     } else if(focus == RESULTS) {
@@ -367,9 +353,7 @@ bool handle_input() {
         else if((ch == '\n' || ch == '\r') && sel < res.size()) play(res[sel]);
         else if(ch == APP_KEY_DOWNLOAD && sel < res.size()) {
             const Video &v = res[sel];
-            // ensure VIDEO_CACHE exists
             mkdir(VIDEO_CACHE.c_str(), 0755);
-            // spawn download and track pid
             int pid = download(v);
             Download dl2; dl2.v = v; dl2.pid = pid; dl2.done = false; dl2.v.path = VIDEO_CACHE + "/" + v.id + ".mkv";
             downloads.insert(downloads.begin(), dl2);

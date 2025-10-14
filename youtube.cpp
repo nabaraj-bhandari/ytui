@@ -1,63 +1,128 @@
 #include "youtube.h"
-#include "process.h"
 #include "config.h"
-#include "files.h"
-#include <string_view>
+#include "utils.h"
+#include <ncurses.h>
+#include <cstdlib>
+#include <sstream>
+#include <sys/stat.h>
 
-namespace youtube {
-    static std::vector<Video> parse_output(std::string_view output) {
-        std::vector<Video> videos;
-        size_t start = 0;
-        while ((start = output.find_first_not_of("\n", start)) != std::string_view::npos) {
-            size_t end = output.find('\n', start);
-            std::string_view line = output.substr(start, end - start);
-            
-            auto next_part = [&](std::string_view& l) -> std::string_view {
-                size_t d = l.find("|||");
-                std::string_view part = l.substr(0, d);
-                l = (d == std::string_view::npos) ? "" : l.substr(d + 3);
-                return part;
-            };
+std::vector<Video> fetch_videos(const std::string &source, int count) {
+    std::vector<Video> r;
+    set_status("Fetching...");
+    std::string cmd = "yt-dlp --no-warnings --flat-playlist --print \"%(id)s|||%(title)s|||%(channel_url)s\" ";
 
-            std::string_view id = next_part(line);
-            std::string_view title = next_part(line);
-            std::string_view channel = next_part(line);
-            std::string_view duration = next_part(line);
-            std::string_view views = line;
-
-            if (!id.empty() && !title.empty()) {
-                videos.push_back({std::string(id), std::string(title), std::string(channel),
-                                  std::string(duration), std::string(views)});
-            }
-            if (end == std::string_view::npos) break;
-            start = end;
-        }
-        return videos;
-    }
-    
-    std::vector<Video> search(const std::string& q) {
-        return parse_output(proc::exec({YTDLP_EXECUTABLE, "--no-warnings", "--flat-playlist",
-            "--print", "%(id)s|||%(title)s|||%(channel)s|||%(duration_string)s|||%(view_count)s", "ytsearch30:" + q}));
+    if(source.find("youtube.com") != std::string::npos || source.find("youtu.be") != std::string::npos) {
+        cmd += "-I 0:" + std::to_string(count) + " \"" + source + "\" 2>/dev/null";
+    } else {
+        cmd += "\"ytsearch" + std::to_string(count) + ":" + source + "\" 2>/dev/null";
     }
 
-    std::vector<Video> fetch_channel_videos(const std::string& url) {
-        return parse_output(proc::exec({YTDLP_EXECUTABLE, "--no-warnings", "--flat-playlist", "-I", "0:30",
-            "--print", "%(id)s|||%(title)s|||%(channel)s|||%(duration_string)s|||%(view_count)s", url}));
+    FILE *p = popen(cmd.c_str(), "r");
+    if(!p) {
+        set_status("Fetch failed");
+        return r;
     }
-    
-    void get_video_context(Video& v) {
-        if (v.channel.empty()) {
-            v.channel = proc::exec({YTDLP_EXECUTABLE, "--print", "%(channel)s", "https://www.youtube.com/watch?v=" + v.id});
-            if(!v.channel.empty()) v.channel.pop_back();
+    char buf[4096];
+    while(fgets(buf, sizeof(buf), p)) {
+        std::string line(buf);
+        if(!line.empty() && line.back() == '\n') line.pop_back();
+
+        size_t d1 = line.find("|||");
+        if(d1 != std::string::npos) {
+            size_t d2 = line.find("|||", d1 + 3);
+            Video v;
+            v.id = line.substr(0, d1);
+            v.title = line.substr(d1 + 3, d2 != std::string::npos ? d2 - d1 - 3 : std::string::npos);
+            if(d2 != std::string::npos) v.channel_url = line.substr(d2 + 3);
+            v.path = VIDEO_CACHE + "/" + v.id + ".mkv";
+            r.push_back(v);
         }
     }
+    pclose(p);
+    set_status("Found " + std::to_string(r.size()) + " videos");
+    return r;
+}
 
-    pid_t download(const Video& v) {
-        return proc::launch_daemon({YTDLP_EXECUTABLE, "-f", YTDL_FORMAT, "--no-playlist", "--restrict-filenames",
-            "--merge-output-format", "mkv", "-o", files::get_home_path(VIDEO_DIR) + "/%(id)s.%(ext)s",
-            "https://www.youtube.com/watch?v=" + v.id});
+int spawn_background(const std::string &cmd) {
+    // returns PID of backgrounded shell command or -1
+    std::string full = cmd + " >/dev/null 2>&1 & echo $!";
+    FILE *p = popen(full.c_str(), "r");
+    if(!p) return -1;
+    int pid = -1;
+    if(fscanf(p, "%d", &pid) != 1) pid = -1;
+    pclose(p);
+    return pid;
+}
+
+int download(const Video &v) {
+    // Full download via yt-dlp into VIDEO_CACHE
+    std::string out = VIDEO_CACHE + "/" + v.id + ".mkv";
+    // ensure dir exists
+    mkdir(VIDEO_CACHE.c_str(), 0755);
+    std::string cmd = "yt-dlp -f \"" + std::string(YTDL_FMT) + "\" --write-info-json -o \"" + out + "\" \"https://www.youtube.com/watch?v=" + v.id + "\"";
+    return spawn_background(cmd);
+}
+
+void show_description() {
+    if(res.empty() || sel >= res.size()) return;
+    const Video &v = res[sel];
+    set_status("Fetching description...");
+    std::string tmp = "/tmp/ytui_desc_" + v.id + ".txt";
+    system(("yt-dlp --skip-download --get-description 'https://www.youtube.com/watch?v=" + 
+            v.id + "' > " + tmp + " 2>/dev/null").c_str());
+
+    def_prog_mode();
+    endwin();
+    system(("less " + tmp).c_str());
+    reset_prog_mode();
+    refresh();
+    set_status("Back to ytui");
+}
+
+void copy_url() {
+    if(res.empty() || sel >= res.size()) return;
+    const Video &v = res[sel];
+    std::string url = "https://www.youtube.com/watch?v=" + v.id;
+
+    if(system(("echo '" + url + "' | xclip -selection clipboard 2>/dev/null").c_str()) == 0) {
+        set_status("Copied to clipboard (xclip)");
+    } else if(system(("echo '" + url + "' | wl-copy 2>/dev/null").c_str()) == 0) {
+        set_status("Copied to clipboard (wl-copy)");
+    } else if(system(("echo '" + url + "' | xsel -b 2>/dev/null").c_str()) == 0) {
+        set_status("Copied to clipboard (xsel)");
+    } else {
+        set_status("No clipboard tool found");
     }
-     std::string fetch_description(const std::string& video_id) {
-        return proc::exec({YTDLP_EXECUTABLE, "--get-description", "https://www.youtube.com/watch?v=" + video_id});
+}
+
+void show_related() {
+    if(history.empty()) return;
+    const Video &v = history[0];
+    set_status("Finding related videos...");
+    res = fetch_videos("https://www.youtube.com/watch?v=" + v.id, 20);
+    if(!res.empty()) {
+        focus = RESULTS;
+        sel = 0;
+    }
+}
+
+void show_channel() {
+    if(res.empty() || sel >= res.size()) return;
+    const Video &v = res[sel];
+    if(v.channel_url.empty()) {
+        set_status("No channel URL available");
+        return;
+    }
+    set_status("Loading channel...");
+    res = fetch_videos(v.channel_url, 20);
+    sel = 0;
+}
+
+void show_trending() {
+    set_status("Loading trending...");
+    res = fetch_videos("https://www.youtube.com/feed/trending", 30);
+    if(!res.empty()) {
+        focus = RESULTS;
+        sel = 0;
     }
 }

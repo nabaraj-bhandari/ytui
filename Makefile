@@ -1,33 +1,31 @@
-# Makefile for ytui
-# See config.h for configuration
-
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -pedantic -O2
-LDFLAGS = -lncurses -lpthread
-TARGET = ytui
-SRCS = ytui.cpp ui.cpp process.cpp youtube.cpp files.cpp
-OBJS = $(SRCS:.cpp=.o)
-PREFIX = /usr/local
+CXXFLAGS = -Wall -Wextra -std=c++17 -O2
+LDFLAGS = -lncurses
 
-.PHONY: all clean install uninstall
+TARGET = ytui
+SRCS = main.cpp globals.cpp utils.cpp youtube.cpp  ui.cpp
+OBJS = $(SRCS:.cpp=.o)
+HEADERS = config.h types.h utils.h mpv.h youtube.h ui.h
+
+.PHONY: all clean install
 
 all: $(TARGET)
 
 $(TARGET): $(OBJS)
 	$(CXX) $(OBJS) -o $(TARGET) $(LDFLAGS)
 
-%.o: %.cpp
+%.o: %.cpp $(HEADERS)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(TARGET) $(OBJS)
+	rm -f $(OBJS) $(TARGET)
 
-install: all
-	@echo installing executable to $(PREFIX)/bin
-	@mkdir -p $(PREFIX)/bin
-	@cp -f $(TARGET) $(PREFIX)/bin
-	@chmod 755 $(PREFIX)/bin/$(TARGET)
+install: $(TARGET)
+	install -Dm755 $(TARGET) $(DESTDIR)/usr/local/bin/$(TARGET)
 
-uninstall:
-	@echo removing executable from $(PREFIX)/bin
-	@rm -f $(PREFIX)/bin/$(TARGET)
+# Development helpers
+run: $(TARGET)
+	./$(TARGET)
+
+debug: CXXFLAGS += -g -DDEBUG
+debug: clean $(TARGET)

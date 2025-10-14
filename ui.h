@@ -1,7 +1,9 @@
-#pragma once
+#ifndef UI_H
+#define UI_H
 
-namespace ui {
-    void init();
-    void cleanup();
-    void draw();
-}
+void init_ui();
+void cleanup_ui();
+void draw();
+bool handle_input();
+
+#endif

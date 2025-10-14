@@ -1,12 +1,17 @@
-#pragma once
-#include "structs.h"
-#include <string>
+#ifndef YOUTUBE_H
+#define YOUTUBE_H
+
+#include "types.h"
 #include <vector>
 
-namespace youtube {
-    std::vector<Video> search(const std::string& query);
-    std::vector<Video> fetch_channel_videos(const std::string& channel_url);
-    pid_t download(const Video& v);
-    std::string fetch_description(const std::string& video_id);
-    void get_video_context(Video& v);
-}
+std::vector<Video> fetch_videos(const std::string &source, int count = 30);
+int download(const Video &v);
+int spawn_background(const std::string &cmd);
+// Actions
+void show_description();
+void copy_url();
+void show_related();
+void show_channel();
+void show_trending();
+
+#endif

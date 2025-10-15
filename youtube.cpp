@@ -72,12 +72,29 @@ void show_channel_for(const Video &v) {
         }
     }
     if(url.empty()) { set_status("No channel URL available"); return; }
-    set_status("Loading channel...");
-    channel_videos = fetch_videos(url, MAX_LIST_ITEMS);
+    enter_channel_view(name, url);
+}
+
+void enter_channel_view(const std::string &name, const std::string &url, const std::vector<Video> *prefetched) {
+    if(url.empty()) {
+        set_status("No channel URL available");
+        return;
+    }
+
     channel_name = name.empty() ? url : name;
     channel_url = url;
+
+    if(prefetched) {
+        channel_videos = *prefetched;
+    } else {
+        channel_videos = fetch_videos(url, MAX_LIST_ITEMS);
+    }
+
     focus = CHANNEL;
     sel = 0;
+
+    if(channel_videos.empty()) set_status("No videos found for channel");
+    else set_status("Loaded channel: " + channel_name);
 }
 
 std::string resolve_channel_url_for_video(const std::string &video_id) {

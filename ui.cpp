@@ -16,8 +16,6 @@
 #include <functional>
 #include <iterator>
 
-// Use global MAX_LIST_ITEMS from config.h
-
 void init_ui() {
     setlocale(LC_ALL, "");
     initscr();
@@ -31,7 +29,7 @@ void init_ui() {
     noecho();
     keypad(stdscr, TRUE);
     nodelay(stdscr, TRUE);
-    curs_set(1); // Set cursor visibility to 1 for better visibility
+    curs_set(1);
 }
 
 void cleanup_ui() {
@@ -108,15 +106,14 @@ static void set_channel_return(Focus target, size_t selection) {
     channel_return_active = true;
 }
 
-using RowDecorator = std::function<void(size_t, int, int)>;
-
 static void draw_section(int y, int h, const std::string &title,
                          const std::vector<Video> &items,
-                         bool active, size_t offset,
-                         const RowDecorator &decorate = RowDecorator()) {
+                         bool active, size_t offset) {
     int w = getmaxx(stdscr);
+    std::string logo = "-=YTUI=-";
     if (active) attron(COLOR_PAIR(1) | A_BOLD);
     else attron(A_DIM);
+    mvprintw(0, (w - (int)logo.length()) / 2, "%s", logo.c_str());
     mvprintw(y, 0, "--- %s ", title.c_str());
     for (int i = title.length() + 5; i < w; i++) addch('-');
     attroff(COLOR_PAIR(1) | A_BOLD | A_DIM);
@@ -131,18 +128,15 @@ static void draw_section(int y, int h, const std::string &title,
 
         // Mark downloaded videos with '*' and non-downloaded with 'o' for all video lists
         std::string prefix = is_video_downloaded(items[idx]) ? "* " : "o ";
-
-        mvprintw(y + 1 + i, 0, "%s", prefix.c_str());
         std::string num = std::to_string(idx + 1) + ". ";
-        printw("%s", num.c_str());
+        mvprintw(y + 1 + i, 2, "%s %s", prefix.c_str(),num.c_str());
 
-        int max_w = w - prefix.length() - num.length() - 2;
+        int max_w = w - prefix.length() - num.length() - 3;
         std::string disp_title = items[idx].title;
         if ((int)disp_title.length() > max_w)
             disp_title = disp_title.substr(0, max_w - 3) + "...";
         printw("%s", disp_title.c_str());
 
-        if (decorate) decorate(idx, y + 1 + (int)i, w);
 
         if (selected) attroff(A_REVERSE | A_BOLD);
     }
@@ -183,10 +177,10 @@ static void draw_subscriptions_ui(int h, int w) {
     if (subs.empty()) load_subs();
 
     std::vector<Video> dummy;
-    draw_section(2, h - 4, "SUBSCRIPTIONS", dummy, true, 0);
+    draw_section(1, h - 4, "SUBSCRIPTIONS", dummy, true, 0);
 
     if (subs.empty()) {
-        mvprintw(4, 4, "No subscriptions added yet.");
+        mvprintw(3, 4, "No subscriptions added yet.");
         return;
     }
 
@@ -202,7 +196,7 @@ static void draw_subscriptions_ui(int h, int w) {
         const bool is_active_channel = (subs_channel_idx == (int)i);
         const char marker = is_active_channel ? '>' : ' ';
 
-        mvprintw(3 + i, 2, "%c %2zu. %s", marker, i + 1, name.c_str());
+        mvprintw(2 + i, 2, "%c %2zu. %s", marker, i + 1, name.c_str());
 
         if (selch) attroff(A_REVERSE | A_BOLD);
     }
@@ -224,7 +218,7 @@ static void open_subscription_channel(size_t index) {
     const std::string &url = subs[index].url;
     std::string name = subs[index].name.empty() ? url : subs[index].name;
     const std::vector<Video> *prefetched = cache.empty() ? nullptr : &cache;
-    enter_channel_view(name, url, prefetched);
+    enter_channel_view(url, prefetched);
 }
 
 void draw() {
@@ -232,15 +226,13 @@ void draw() {
     int h, w;
     getmaxyx(stdscr, h, w);
 
-    auto draw_videos = [&](const std::string &title, const std::vector<Video> &videos,
-                           const RowDecorator &decorator = RowDecorator()) {
-        draw_section(2, h - 4, title, videos, true, 0, decorator);
+    auto draw_videos = [&](const std::string &title, const std::vector<Video> &videos) {
+        draw_section(1, h - 2, title, videos, true, 0);
     };
 
     switch (focus) {
         case HOME: {
-            std::string logo = "YTUI";
-            mvprintw(3, (w - (int)logo.length()) / 2, "%s", logo.c_str());
+            draw_videos("History", history);
             break;
         }
         case SEARCH:
@@ -248,16 +240,7 @@ void draw() {
             break;
         case DOWNLOADS: {
             auto items = get_download_items();
-            RowDecorator decorator = [&](size_t idx, int row, int width) {
-                const auto &v = items[idx];
-                struct stat st{};
-                if (stat(v.path.c_str(), &st) == 0 && st.st_size > 0) {
-                    char buf[16];
-                    snprintf(buf, sizeof(buf), "%5.1fMB", (double)st.st_size / (1024 * 1024));
-                    mvprintw(row, width - 9, "%s", buf);
-                }
-            };
-            draw_videos("DOWNLOADS", items, decorator);
+            draw_videos("DOWNLOADS", items);
             break;
         }
         case SUBSCRIPTIONS:
@@ -267,13 +250,9 @@ void draw() {
             draw_videos("RESULTS", res);
             break;
         case CHANNEL: {
-            draw_videos("CHANNEL: " + channel_name, channel_videos);
-            mvprintw(2, getmaxx(stdscr) - (int)badge.length() - 2, "%s", badge.c_str());
+            draw_videos("CHANNEL", channel_videos);
             break;
         }
-        case PROFILE:
-            draw_videos("PROFILE - History", history);
-            break;
     }
 
     refresh_download_statuses();
@@ -356,10 +335,6 @@ bool handle_input() {
                 set_channel_return(RESULTS, sel);
                 show_channel_for(res[sel]);
             }
-            else if(focus == PROFILE && sel < history.size()) {
-                set_channel_return(PROFILE, sel);
-                show_channel_for(history[sel]);
-            }
             else if(focus == DOWNLOADS) {
                 auto items = get_download_items();
                 if(sel < items.size()) {
@@ -395,7 +370,6 @@ bool handle_input() {
     if(!search_insert) {
         if(ch == APP_KEY_SUBS) { set_focus(SUBSCRIPTIONS); return true; }
         if(ch == APP_KEY_DOWNLOADS) { set_focus(DOWNLOADS); return true; }
-        if(ch == APP_KEY_PROFILE) { set_focus(PROFILE); return true; }
         if(ch == APP_KEY_HOME) { set_focus(HOME); return true; }
         if(ch == APP_KEY_SEARCH) { set_focus(SEARCH); return true; }
     }
@@ -405,7 +379,6 @@ bool handle_input() {
         if(ch == '\t') { insert_mode = !insert_mode; query_pos = query.size(); curs_set(insert_mode ? 1 : 0); return true; }
 
         if(!insert_mode) {
-            if(navBack) { set_focus(HOME); return true; }
             // navigate recent search list
             if(navDown && !search_hist.empty()) {
                 if(search_hist_idx < (int)search_hist.size() - 1) search_hist_idx++;
@@ -430,6 +403,7 @@ bool handle_input() {
             }
         } else {
             // insert mode: Enter to run and exit, cursored editing
+            reset_search_state();
             if(ch == '\n' || ch == '\r') {
                 if(!query.empty()) {
                     res = fetch_videos(query, MAX_LIST_ITEMS);
@@ -452,11 +426,7 @@ bool handle_input() {
                               [&]{ set_focus(SEARCH); },
                               [&]{ play(res[sel]); })) return true;
 
-    } else if(focus == PROFILE) {
-        if(handle_video_list(history,
-                              [&]{ set_focus(HOME); },
-                              [&]{ play(history[sel]); })) return true;
-    }
+    } 
     else if (focus == CHANNEL) {
         if(navBack || ch == 27) { // ESC/left back to previous view
             auto restore_channel_origin = [&]() {
@@ -491,11 +461,6 @@ bool handle_input() {
                         else sel = clamp_selection(items.size());
                         break;
                     }
-                    case PROFILE:
-                        focus = PROFILE;
-                        if(history.empty()) sel = 0;
-                        else sel = clamp_selection(history.size());
-                        break;
                     case SEARCH:
                         focus = SEARCH;
                         sel = 0;

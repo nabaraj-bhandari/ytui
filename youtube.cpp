@@ -8,21 +8,6 @@
 #include <cctype>
 #include <cstdio>
 
-namespace {
-
-  std::string get_channel_name (std::string url) {
-    std::string name;
-    
-    size_t at_pos = url.find('@');
-
-    if (at_pos != std::string::npos) {
-        name = url.substr(at_pos + 1);
-    } else {
-        name = "Unknown";
-    }
-    return name;
-}
-}
 
 std::vector<Video> fetch_videos(const std::string &source, int count) {
     std::vector<Video> r;
@@ -99,35 +84,26 @@ void show_channel_for(const Video &v) {
         channel_return_active = true;
     }
 
-    std::string name = get_channel_name(url);
-    enter_channel_view(name, url);
+    enter_channel_view(url);
 }
 
-void enter_channel_view(const std::string &name, const std::string &url, const std::vector<Video> *prefetched) {
+void enter_channel_view(const std::string &url, const std::vector<Video> *prefetched) {
     if(url.empty()) {
         set_status("No channel URL available");
         return;
     }
-
     channel_url = url;
-    channel_name = name;
 
     if(prefetched) {
         channel_videos = *prefetched;
     } else {
         channel_videos = fetch_videos(url, MAX_LIST_ITEMS);
     }
-
-    for(const auto &vid : channel_videos) {
-        channel_name = vid.channel_name;
-        break;
-    }
-
     focus = CHANNEL;
     sel = 0;
 
     if(channel_videos.empty()) set_status("No videos found for channel");
-    else set_status("Loaded channel: " + channel_name);
+    else set_status("Inside a channel");
 }
 
 std::string resolve_channel_url_for_video(const std::string &video_id) {

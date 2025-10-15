@@ -14,7 +14,7 @@ struct Channel {
     std::string name, url;
 };
 
-enum Focus { HOME, DOWNLOADS, PROFILE, SUBSCRIPTIONS, CHANNEL, SEARCH, RESULTS };
+enum Focus { HOME, DOWNLOADS, SUBSCRIPTIONS, CHANNEL, SEARCH, RESULTS };
 
 // Global state
 extern std::vector<std::string> search_hist;

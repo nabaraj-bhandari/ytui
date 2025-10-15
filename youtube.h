@@ -12,7 +12,7 @@ int spawn_background(const std::string &cmd);
 // Actions
 void show_channel();
 void show_channel_for(const Video &v);
-void enter_channel_view(const std::string &name, const std::string &url, const std::vector<Video> *prefetched = nullptr);
+void enter_channel_view(const std::string &url, const std::vector<Video> *prefetched = nullptr);
 std::string resolve_channel_url_for_video(const std::string &video_id);
 
 #endif

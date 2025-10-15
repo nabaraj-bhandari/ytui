@@ -27,7 +27,6 @@ extern std::vector<Video> subs_videos;
 extern std::vector<Video> channel_videos;
 extern std::string channel_name;
 extern std::string channel_url;
-extern std::map<std::string, std::string> channel_cache;
 extern int subs_channel_idx; // -1 = showing channel list; >=0 = showing videos for that channel
 extern std::vector<std::vector<Video>> subs_cache;
 extern std::string query;
@@ -39,5 +38,8 @@ extern Focus focus;
 extern bool insert_mode;
 // Index into search history when on SEARCH page (interactive selection)
 extern int search_hist_idx;
+extern bool channel_return_active;
+extern Focus channel_return_focus;
+extern size_t channel_return_sel;
 
 #endif

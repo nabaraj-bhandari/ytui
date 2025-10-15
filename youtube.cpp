@@ -4,6 +4,25 @@
 
 // System headers
 #include <sys/stat.h>
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
+
+namespace {
+
+  std::string get_channel_name (std::string url) {
+    std::string name;
+    
+    size_t at_pos = url.find('@');
+
+    if (at_pos != std::string::npos) {
+        name = url.substr(at_pos + 1);
+    } else {
+        name = "Unknown";
+    }
+    return name;
+}
+}
 
 std::vector<Video> fetch_videos(const std::string &source, int count) {
     std::vector<Video> r;
@@ -20,15 +39,16 @@ std::vector<Video> fetch_videos(const std::string &source, int count) {
     while(fgets(buf, sizeof(buf), p)) {
         std::string line(buf);
         if(!line.empty() && line.back() == '\n') line.pop_back();
-    size_t d1 = line.find("|||");
-    if(d1 == std::string::npos) continue;
-    size_t d2 = line.find("|||", d1 + 3);
-    size_t d3 = line.find("|||", d2 + 3);
-    std::string id = line.substr(0, d1);
-    std::string title = line.substr(d1 + 3, d2 != std::string::npos ? d2 - d1 - 3 : std::string::npos);
-    std::string curl = d2 != std::string::npos ? line.substr(d2 + 3, d3 != std::string::npos ? d3 - d2 - 3 : std::string::npos) : std::string();
-    std::string cname = d3 != std::string::npos ? line.substr(d3 + 3) : std::string();
-    r.push_back({id, title, "", curl, cname});
+        size_t d1 = line.find("|||");
+        if(d1 == std::string::npos) continue;
+        size_t d2 = line.find("|||", d1 + 3);
+        size_t d3 = line.find("|||", d2 + 3);
+        std::string id = line.substr(0, d1);
+        std::string title = line.substr(d1 + 3, d2 != std::string::npos ? d2 - d1 - 3 : std::string::npos);
+        std::string curl = d2 != std::string::npos ? line.substr(d2 + 3, d3 != std::string::npos ? d3 - d2 - 3 : std::string::npos) : std::string();
+        std::string cname = d3 != std::string::npos ? line.substr(d3 + 3) : std::string();
+
+        r.push_back({id, title, "", curl, cname});
     }
     pclose(p);
     set_status("Found " + std::to_string(r.size()) + " videos");
@@ -47,6 +67,7 @@ int download(const Video &v) {
     std::string cmd = "yt-dlp -f \"" + std::string(YTDL_FMT) + "\" --restrict-filenames -o \"" + VIDEO_CACHE + "/%(title)s%(id)s.mkv\" \"https://www.youtube.com/watch?v=" + v.id + "\"";
     return spawn_background(cmd);
 }
+
 void show_channel() {
     if(!res.empty() && sel < res.size()) {
         show_channel_for(res[sel]);
@@ -63,15 +84,22 @@ void show_channel() {
 
 void show_channel_for(const Video &v) {
     std::string url = v.channel_url;
-    std::string name = v.channel_name.empty() ? v.title : v.channel_name;
-    if(url.empty() && !v.id.empty()) {
-        url = channel_cache_lookup(v.id);
-        if(url.empty()) {
-            url = resolve_channel_url_for_video(v.id);
-            if(!url.empty()) { channel_cache_store(v.id, url); save_channel_cache(); }
-        }
+    if(url.empty() && !v.id.empty()) url = resolve_channel_url_for_video(v.id);
+    if(url.empty()) {
+        set_status("No channel URL available");
+        return;
     }
-    if(url.empty()) { set_status("No channel URL available"); return; }
+
+    if(!channel_return_active && focus != CHANNEL) {
+        channel_return_focus = focus;
+        if(focus == SUBSCRIPTIONS && subs_channel_idx >= 0)
+            channel_return_sel = static_cast<size_t>(subs_channel_idx);
+        else
+            channel_return_sel = sel;
+        channel_return_active = true;
+    }
+
+    std::string name = get_channel_name(url);
     enter_channel_view(name, url);
 }
 
@@ -81,13 +109,18 @@ void enter_channel_view(const std::string &name, const std::string &url, const s
         return;
     }
 
-    channel_name = name.empty() ? url : name;
     channel_url = url;
+    channel_name = name;
 
     if(prefetched) {
         channel_videos = *prefetched;
     } else {
         channel_videos = fetch_videos(url, MAX_LIST_ITEMS);
+    }
+
+    for(const auto &vid : channel_videos) {
+        channel_name = vid.channel_name;
+        break;
     }
 
     focus = CHANNEL;

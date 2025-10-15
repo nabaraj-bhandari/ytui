@@ -38,7 +38,6 @@ void cleanup_ui() {
     endwin();
 }
 
-// Build a list of downloads for display: on-disk files (done) followed by active/queued downloads
 static std::vector<Video> get_download_items() {
     std::vector<Video> out;
     auto cached = scan_video_cache();
@@ -53,7 +52,6 @@ static std::vector<Video> get_download_items() {
         vv.path = VIDEO_CACHE + "/" + vv.id + ".mkv";
         out.push_back(vv);
     }
-
     return out;
 }
 
@@ -102,6 +100,12 @@ static void refresh_download_statuses() {
         d.done = found;
         if (found) d.pid = 0;
     }
+}
+
+static void set_channel_return(Focus target, size_t selection) {
+    channel_return_focus = target;
+    channel_return_sel = selection;
+    channel_return_active = true;
 }
 
 using RowDecorator = std::function<void(size_t, int, int)>;
@@ -209,6 +213,8 @@ static void open_subscription_channel(size_t index) {
 
     subs_channel_idx = static_cast<int>(index);
 
+    set_channel_return(SUBSCRIPTIONS, index);
+
     if (subs_cache.size() <= index) subs_cache.resize(index + 1);
     auto &cache = subs_cache[index];
     if (cache.empty()) {
@@ -262,8 +268,6 @@ void draw() {
             break;
         case CHANNEL: {
             draw_videos("CHANNEL: " + channel_name, channel_videos);
-            bool is_sub = is_subscribed(channel_url, channel_name);
-            std::string badge = is_sub ? "[SUB]" : "[+SUB]";
             mvprintw(2, getmaxx(stdscr) - (int)badge.length() - 2, "%s", badge.c_str());
             break;
         }
@@ -295,6 +299,8 @@ bool handle_input() {
     auto set_focus = [&](Focus target) {
         focus = target;
         sel = 0;
+        channel_return_active = false;
+        if(target != CHANNEL) subs_channel_idx = -1;
         reset_search_state();
     };
 
@@ -306,16 +312,60 @@ bool handle_input() {
         else if (ch == 'l' || ch == 'L') ch = KEY_RIGHT;
     }
 
+    const bool navDown = (ch == APP_KEY_DOWN || ch == KEY_DOWN);
+    const bool navUp = (ch == APP_KEY_UP || ch == KEY_UP);
+    const bool navBack = (ch == KEY_LEFT);
+    const bool navSelect = (ch == '\n' || ch == '\r' || ch == KEY_RIGHT);
+
+    auto move_selection = [&](size_t size) {
+        if (size == 0) { sel = 0; return false; }
+        if (sel >= size) sel = size - 1;
+        if (navDown && sel + 1 < size) { ++sel; return true; }
+        if (navUp && sel > 0) { --sel; return true; }
+        return false;
+    };
+
+    auto handle_list_navigation = [&](size_t size,
+                                      const std::function<void()> &onBack,
+                                      const std::function<void()> &onSelect) {
+        if (move_selection(size)) return true;
+        if (navBack && onBack) { onBack(); return true; }
+        if (navSelect && onSelect && size > 0 && sel < size) { onSelect(); return true; }
+        return false;
+    };
+
+    auto handle_video_list = [&](const std::vector<Video> &list,
+                                 const std::function<void()> &onBack,
+                                 const std::function<void()> &onSelect,
+                                 const std::function<void()> &onDownload = std::function<void()>()) {
+        if(handle_list_navigation(list.size(), onBack, onSelect)) return true;
+        if(ch == APP_KEY_DOWNLOAD && sel < list.size()) {
+            if(onDownload) onDownload();
+            else enqueue_download(list[sel]);
+            return true;
+        }
+        return false;
+    };
+
     if (focus == HOME && ch == KEY_RIGHT) { set_focus(SEARCH); return true; }
 
     // Mode-specific actions
     if(focus != SEARCH) {
         if(ch == APP_KEY_CHANNEL) {
-            if(focus == RESULTS && sel < res.size()) { show_channel_for(res[sel]); }
-            else if(focus == PROFILE && sel < history.size()) { show_channel_for(history[sel]); }
+            if(focus == RESULTS && sel < res.size()) {
+                set_channel_return(RESULTS, sel);
+                show_channel_for(res[sel]);
+            }
+            else if(focus == PROFILE && sel < history.size()) {
+                set_channel_return(PROFILE, sel);
+                show_channel_for(history[sel]);
+            }
             else if(focus == DOWNLOADS) {
                 auto items = get_download_items();
-                if(sel < items.size()) show_channel_for(items[sel]);
+                if(sel < items.size()) {
+                    set_channel_return(DOWNLOADS, sel);
+                    show_channel_for(items[sel]);
+                }
             }
             return true;
         }
@@ -355,19 +405,19 @@ bool handle_input() {
         if(ch == '\t') { insert_mode = !insert_mode; query_pos = query.size(); curs_set(insert_mode ? 1 : 0); return true; }
 
         if(!insert_mode) {
-            if(ch == KEY_LEFT) { set_focus(HOME); return true; }
+            if(navBack) { set_focus(HOME); return true; }
             // navigate recent search list
-            if((ch == APP_KEY_DOWN || ch == KEY_DOWN) && !search_hist.empty()) {
+            if(navDown && !search_hist.empty()) {
                 if(search_hist_idx < (int)search_hist.size() - 1) search_hist_idx++;
                 else search_hist_idx = 0;
                 return true;
             }
-            if((ch == APP_KEY_UP || ch == KEY_UP) && !search_hist.empty()) {
+            if(navUp && !search_hist.empty()) {
                 if(search_hist_idx > 0) search_hist_idx--;
                 else search_hist_idx = (int)search_hist.size() - 1;
                 return true;
             }
-            if(ch == '\n' || ch == '\r' || ch == KEY_RIGHT) {
+            if(navSelect) {
                 if(search_hist_idx >= 0 && search_hist_idx < (int)search_hist.size()) {
                     query = search_hist[search_hist_idx];
                 }
@@ -398,82 +448,98 @@ bool handle_input() {
             if(ch >= 32 && ch <= 126) { query.insert(query_pos, 1, (char)ch); query_pos++; return true; }
         }
     } else if(focus == RESULTS) {
-        if((ch == APP_KEY_DOWN || ch == KEY_DOWN) && sel < res.size() - 1) sel++;
-        else if((ch == APP_KEY_UP || ch == KEY_UP) && sel > 0) sel--;
-        else if(ch == KEY_LEFT) { set_focus(SEARCH); return true; }
-        else if((ch == '\n' || ch == '\r' || ch == KEY_RIGHT) && sel < res.size()) play(res[sel]);
-        else if(ch == APP_KEY_DOWNLOAD && sel < res.size()) {
-            const Video &v = res[sel];
-            enqueue_download(v);
-        }
+        if(handle_video_list(res,
+                              [&]{ set_focus(SEARCH); },
+                              [&]{ play(res[sel]); })) return true;
 
     } else if(focus == PROFILE) {
-        if((ch == APP_KEY_DOWN || ch == KEY_DOWN) && sel < history.size() - 1) sel++;
-        else if((ch == APP_KEY_UP || ch == KEY_UP) && sel > 0) sel--;
-        else if(ch == KEY_LEFT) { set_focus(HOME); return true; }
-        else if((ch == '\n' || ch == '\r' || ch == KEY_RIGHT) && sel < history.size()) play(history[sel]);
-        else if(ch == APP_KEY_DOWNLOAD && sel < history.size()) {
-            const Video &v = history[sel];
-            enqueue_download(v);
-        }
+        if(handle_video_list(history,
+                              [&]{ set_focus(HOME); },
+                              [&]{ play(history[sel]); })) return true;
     }
     else if (focus == CHANNEL) {
-        if(ch == KEY_LEFT || ch == 27) { // ESC/left back to subscriptions
-            reset_search_state();
-            focus = SUBSCRIPTIONS;
-            if(subs_channel_idx >= 0 && subs.size() > (size_t)subs_channel_idx)
-                sel = (size_t)subs_channel_idx;
-            else sel = 0;
+        if(navBack || ch == 27) { // ESC/left back to previous view
+            auto restore_channel_origin = [&]() {
+                reset_search_state();
+                Focus target = channel_return_active ? channel_return_focus : SUBSCRIPTIONS;
+                size_t selection = channel_return_active ? channel_return_sel : (subs_channel_idx >= 0 ? (size_t)subs_channel_idx : 0);
+                channel_return_active = false;
+
+                auto clamp_selection = [&](size_t size) {
+                    if(size == 0) return (size_t)0;
+                    if(selection >= size) selection = size - 1;
+                    return selection;
+                };
+
+                subs_channel_idx = -1;
+
+                switch(target) {
+                    case SUBSCRIPTIONS:
+                        focus = SUBSCRIPTIONS;
+                        if(subs.empty()) sel = 0;
+                        else sel = clamp_selection(subs.size());
+                        break;
+                    case RESULTS:
+                        focus = RESULTS;
+                        if(res.empty()) sel = 0;
+                        else sel = clamp_selection(res.size());
+                        break;
+                    case DOWNLOADS: {
+                        focus = DOWNLOADS;
+                        auto items = get_download_items();
+                        if(items.empty()) sel = 0;
+                        else sel = clamp_selection(items.size());
+                        break;
+                    }
+                    case PROFILE:
+                        focus = PROFILE;
+                        if(history.empty()) sel = 0;
+                        else sel = clamp_selection(history.size());
+                        break;
+                    case SEARCH:
+                        focus = SEARCH;
+                        sel = 0;
+                        break;
+                    case HOME:
+                        focus = HOME;
+                        sel = 0;
+                        break;
+                    default:
+                        focus = target;
+                        sel = selection;
+                        break;
+                }
+            };
+
+            restore_channel_origin();
             return true;
         }
 
         if (channel_videos.empty()) return true;
 
-        if((ch == APP_KEY_DOWN || ch == KEY_DOWN) && sel < channel_videos.size() - 1) sel++;
-        else if((ch == APP_KEY_UP || ch == KEY_UP) && sel > 0) sel--;
-        else if((ch == '\n' || ch == '\r' || ch == KEY_RIGHT) && sel < channel_videos.size()) play(channel_videos[sel]);
-        else if(ch == APP_KEY_DOWNLOAD && sel < channel_videos.size()) enqueue_download(channel_videos[sel]);
-        else if(ch == APP_KEY_SUB_TOGGLE) {
-            bool now_sub = toggle_subscription(channel_name, channel_url);
-            subs_cache.clear();
-            if(now_sub) {
-                auto it = std::find_if(subs.begin(), subs.end(), [&](const Channel &c){ return c.url == channel_url || c.name == channel_name; });
-                if(it != subs.end()) subs_channel_idx = static_cast<int>(std::distance(subs.begin(), it));
-                set_status(std::string("Subscribed: ") + channel_name);
-            } else {
-                subs_channel_idx = -1;
-                set_status(std::string("Unsubscribed: ") + channel_name);
-            }
-            return true;
-        }
+        if(handle_video_list(channel_videos,
+                              nullptr,
+                              [&]{ play(channel_videos[sel]); },
+                              [&]{ enqueue_download(channel_videos[sel]); })) return true;
     }
     else if (focus == DOWNLOADS) {
         auto items = get_download_items();
-        if ((ch == APP_KEY_DOWN || ch == KEY_DOWN) && sel < items.size() - 1) sel++;
-        else if ((ch == APP_KEY_UP || ch == KEY_UP) && sel > 0) sel--;
-        else if (ch == KEY_LEFT) { set_focus(HOME); return true; }
-        else if ((ch == '\n' || ch == '\r') && sel < items.size()) {
-            const auto &v = items[sel];
-            if (file_exists(v.path)) play(v);
-            else play(v); // fallback to remote stream
-        } else if ((ch == KEY_RIGHT) && sel < items.size()) {
+        auto play_item = [&](){
             const auto &v = items[sel];
             if (file_exists(v.path)) play(v);
             else play(v);
-        } else if (ch == APP_KEY_DOWNLOAD && sel < items.size()) {
-            enqueue_download(items[sel]);
-        }
+        };
+        if(handle_video_list(items,
+                              [&]{ set_focus(HOME); },
+                              play_item,
+                              [&]{ enqueue_download(items[sel]); })) return true;
     }
     else if(focus == SUBSCRIPTIONS) {
         if(subs.empty()) return true;
 
-        if((ch == APP_KEY_DOWN || ch == KEY_DOWN) && sel < subs.size() - 1) sel++;
-        else if((ch == APP_KEY_UP || ch == KEY_UP) && sel > 0) sel--;
-        else if(ch == KEY_LEFT) { set_focus(HOME); return true; }
-        else if((ch == '\n' || ch == '\r' || ch == KEY_RIGHT) && sel < subs.size()) {
+        if(handle_list_navigation(subs.size(), [&]{ set_focus(HOME); }, [&]{
             open_subscription_channel(sel);
-            return true;
-        }
+        })) return true;
     }
 
     return true;

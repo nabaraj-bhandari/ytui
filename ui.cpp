@@ -134,6 +134,8 @@ void render_search_view() {
     int bottom = top + 2;
     if (bottom >= h - 1) bottom = std::max(top + 1, h - 2);
 
+    bool highlight_input = (!insert_mode && search_hist_idx < 0);
+
     std::string header = insert_mode ? "Search (editing)" : "Search";
     int header_width = (int)header.size();
     int header_x = std::max(1, left + std::max(0, (right - left - header_width) / 2));
@@ -143,7 +145,9 @@ void render_search_view() {
     mvprintw(header_y, header_x, "%s", header.c_str());
     attroff(A_BOLD | COLOR_PAIR(1));
 
-    std::string help = "Tab edit  Enter search  Up/Down history";
+    std::string help = insert_mode
+        ? "Enter search  Esc normal  Left/Right move"
+        : "Enter edit  Esc normal  j/k navigate";
     if ((int)help.size() > w - left - 1) help.resize(std::max(0, w - left - 1));
     int help_y = std::min(bottom + 1, h - 2);
     if (help_y < 0) help_y = 0;
@@ -161,7 +165,13 @@ void render_search_view() {
     mvaddch(bottom, left, ACS_LLCORNER);
     mvhline(bottom, left + 1, ACS_HLINE, inner_width);
     mvaddch(bottom, right, ACS_LRCORNER);
-    mvhline(top + 1, left + 1, ' ', inner_width);
+    if (highlight_input) {
+        attron(A_REVERSE);
+        mvhline(top + 1, left + 1, ' ', inner_width);
+        attroff(A_REVERSE);
+    } else {
+        mvhline(top + 1, left + 1, ' ', inner_width);
+    }
 
     int text_start = left + 2;
     if (text_start >= right) text_start = right - 1;
@@ -186,14 +196,18 @@ void render_search_view() {
 
     if (!query.empty() && !display.empty()) {
         if (insert_mode) attron(COLOR_PAIR(1) | A_BOLD);
+        else if (highlight_input) attron(A_REVERSE);
         mvprintw(top + 1, text_start, "%s", display.c_str());
         if (insert_mode) attroff(COLOR_PAIR(1) | A_BOLD);
+        else if (highlight_input) attroff(A_REVERSE);
     } else if (!insert_mode && window_width > 0) {
         std::string placeholder = "Type to search";
         if ((int)placeholder.size() > text_width) placeholder.resize(std::max(0, text_width));
+        if (highlight_input) attron(A_REVERSE);
         attron(A_DIM);
         mvprintw(top + 1, text_start, "%s", placeholder.c_str());
         attroff(A_DIM);
+        if (highlight_input) attroff(A_REVERSE);
     }
 
     int cx = text_start + (int)(caret - window_start);
@@ -444,17 +458,52 @@ bool handle_input() {
     }
 
     if (focus == SEARCH) {
-        if (ch == '\t') { insert_mode = !insert_mode; query_pos = query.size(); curs_set(insert_mode ? 1 : 0); return true; }
+        if (ch == '\t') {
+            insert_mode = !insert_mode;
+            query_pos = query.size();
+            if (insert_mode) {
+                search_hist_idx = -1;
+                curs_set(1);
+            } else {
+                search_hist_idx = -1;
+                curs_set(0);
+            }
+            return true;
+        }
+
+        if (ch == 27 && insert_mode) {
+            insert_mode = false;
+            search_hist_idx = -1;
+            query_pos = query.size();
+            curs_set(0);
+            return true;
+        }
 
         if (!insert_mode) {
-            if (navDown && !search_hist.empty()) { search_hist_idx = std::min((int)search_hist.size() - 1, search_hist_idx + 1); if (search_hist_idx < 0) search_hist_idx = 0; return true; }
-            if (navUp && !search_hist.empty()) { if (search_hist_idx > 0) --search_hist_idx; else search_hist_idx = (int)search_hist.size() - 1; return true; }
+            if (navDown) {
+                if (search_hist_idx < 0 && !search_hist.empty()) search_hist_idx = 0;
+                else if (search_hist_idx >= 0 && search_hist_idx + 1 < (int)search_hist.size()) ++search_hist_idx;
+                return true;
+            }
+            if (navUp) {
+                if (search_hist_idx > 0) --search_hist_idx;
+                else if (search_hist_idx == 0) search_hist_idx = -1;
+                else if (search_hist_idx < 0 && !search_hist.empty()) search_hist_idx = (int)search_hist.size() - 1;
+                return true;
+            }
             if (navSelect) {
-                if (search_hist_idx >= 0 && search_hist_idx < (int)search_hist.size()) query = search_hist[search_hist_idx];
-                if (!query.empty()) {
-                    res = fetch_videos(query, MAX_LIST_ITEMS);
-                    add_search_hist(query);
-                    set_focus(RESULTS);
+                if (search_hist_idx >= 0 && search_hist_idx < (int)search_hist.size()) {
+                    query = search_hist[search_hist_idx];
+                    if (!query.empty()) {
+                        res = fetch_videos(query, MAX_LIST_ITEMS);
+                        add_search_hist(query);
+                        set_focus(RESULTS);
+                    }
+                } else {
+                    insert_mode = true;
+                    search_hist_idx = -1;
+                    query_pos = query.size();
+                    curs_set(1);
                 }
                 return true;
             }
@@ -466,6 +515,7 @@ bool handle_input() {
                     set_focus(RESULTS);
                 } else {
                     insert_mode = false;
+                    search_hist_idx = -1;
                     query_pos = query.size();
                     curs_set(0);
                 }
@@ -521,6 +571,11 @@ bool handle_input() {
             onBack = [&]{ set_focus(HOME); };
             onSelect = [&]{ play((*list)[sel]); };
             onDownload = [&]{ enqueue_download((*list)[sel]); };
+        } else if (focus == HOME) {
+            if (history.empty()) return true;
+            list = &history;
+            onSelect = [&]{ play(history[sel]); };
+            onDownload = [&]{ enqueue_download(history[sel]); };
         } else if (focus == SUBSCRIPTIONS) {
             if (subs.empty()) return true;
             if (handle_list_navigation(subs.size(), [&]{ set_focus(HOME); }, [&]{ enter_subscription_channel(sel); })) return true;

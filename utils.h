@@ -23,7 +23,6 @@ void save_history();
 
 // Subscriptions
 void load_subs();
-void save_subs();
 
 std::vector<Video> scan_video_cache();
 std::vector<Video> collect_download_items();
@@ -32,6 +31,8 @@ void update_download_statuses(const std::vector<Video> &cached);
 bool is_video_downloaded(const Video &v);
 std::string find_cached_path_by_id(const std::string &id);
 void show_thumbnail(const Video &v);
+void hide_thumbnail();
+void cleanup_thumbnail();
 
 // Utility encoding for safe persistence
 std::string esc(const std::string &s);
@@ -41,8 +42,5 @@ std::string unesc(const std::string &s);
 int enqueue_download(const Video &v);
 void ensure_video_cache();
 size_t visible_count(size_t available_rows, size_t total_items);
-
-// Subscription helpers
-bool is_subscribed(const std::string &url, const std::string &name);
 
 #endif

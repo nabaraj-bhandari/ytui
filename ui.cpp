@@ -32,6 +32,10 @@ size_t &scroll_for_focus(Focus f) {
     }
 }
 
+bool focus_has_video_content(Focus f) {
+    return f == HOME || f == DOWNLOADS || f == RESULTS || f == CHANNEL;
+}
+
 void render_status_bar(const std::vector<Video> *cached_downloads = nullptr) {
     int h, w;
     getmaxyx(stdscr, h, w);
@@ -433,6 +437,7 @@ bool handle_input() {
         if (target != CHANNEL) subs_channel_idx = -1;
         scroll_for_focus(target) = 0;
         reset_search_state();
+        if (!focus_has_video_content(target)) hide_thumbnail();
     };
 
     bool cached_files_initialized = false;
@@ -542,11 +547,13 @@ bool handle_input() {
             set_focus(DOWNLOADS);
             const auto &items = ensure_download_items();
             if (!items.empty() && sel < items.size()) show_thumbnail(items[sel]);
+            else hide_thumbnail();
             return true;
         }
         if (ch == APP_KEY_HOME) {
             set_focus(HOME);
             if (!history.empty() && sel < history.size()) show_thumbnail(history[sel]);
+            else hide_thumbnail();
             return true;
         }
         if (ch == APP_KEY_SEARCH) { set_focus(SEARCH); return true; }
@@ -594,6 +601,7 @@ bool handle_input() {
                         add_search_hist(query);
                         set_focus(RESULTS);
                         if (!res.empty() && sel < res.size()) show_thumbnail(res[sel]);
+                        else hide_thumbnail();
                     }
                 } else {
                     insert_mode = true;
@@ -610,6 +618,7 @@ bool handle_input() {
                     add_search_hist(query);
                     set_focus(RESULTS);
                     if (!res.empty() && sel < res.size()) show_thumbnail(res[sel]);
+                    else hide_thumbnail();
                 } else {
                     insert_mode = false;
                     search_hist_idx = -1;
@@ -647,6 +656,7 @@ bool handle_input() {
                 case HOME: default: focus = (target==HOME?HOME:target); sel = (target==HOME?0:selection); break;
             }
             scroll_for_focus(focus) = 0;
+            if (!focus_has_video_content(focus)) hide_thumbnail();
         };
 
         const std::vector<Video> *list = nullptr;

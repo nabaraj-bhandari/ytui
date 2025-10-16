@@ -9,7 +9,6 @@
 #include <array>
 #include <cctype>
 #include <cerrno>
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -215,12 +214,6 @@ void load_subs() {
     }
 }
 
-void save_subs() {
-    std::ofstream f(SUBS_FILE);
-    f << "# Format: Name | URL\n";
-    for(const auto &ch : subs) f << ch.name << " | " << ch.url << "\n";
-}
-
 std::vector<Video> scan_video_cache() {
     std::vector<Video> out;
     DIR *d = opendir(VIDEO_CACHE.c_str());
@@ -331,12 +324,6 @@ int enqueue_download(const Video &v) {
 }
 
 void show_thumbnail(const Video &v) {
-    if (thumbnail_pid > 0) {
-        kill(thumbnail_pid, SIGTERM);
-        waitpid(thumbnail_pid, nullptr, 0);
-        thumbnail_pid = -1;
-    }
-
     if (v.id.empty()) return;
 
     std::string url = "https://img.youtube.com/vi/" + v.id + "/mqdefault.jpg";
@@ -344,37 +331,49 @@ void show_thumbnail(const Video &v) {
     ThumbFetchResult fetch = ensure_thumbnail_cached(v, url, image_path);
     if (fetch != ThumbFetchResult::Ok) return;
 
+    pid_t previous = thumbnail_pid;
     pid_t pid = fork();
     if (pid < 0) return;
 
     if (pid == 0) {
+        setsid();
         execlp("feh", "feh", "--title", "YTUI Thumbnail", image_path.c_str(), static_cast<char *>(nullptr));
         _exit(127);
     }
 
     int status = 0;
     pid_t result = waitpid(pid, &status, WNOHANG);
-    if (result == pid) return;
+    if (result == pid) {
+        if (previous > 0) thumbnail_pid = previous;
+        return;
+    }
 
     thumbnail_pid = pid;
 
+    if (previous > 0 && previous != pid) {
+        kill(previous, SIGTERM);
+        waitpid(previous, nullptr, 0);
+    }
+
     std::thread([pid]() {
-        std::this_thread::sleep_for(std::chrono::seconds(2));
-        if (thumbnail_pid == pid) {
-            kill(pid, SIGTERM);
-            waitpid(pid, nullptr, 0);
-            thumbnail_pid = -1;
-        } else {
-            waitpid(pid, nullptr, 0);
+        int status = 0;
+        if (waitpid(pid, &status, 0) < 0) {
+            if (errno == ECHILD && thumbnail_pid == pid) thumbnail_pid = -1;
+            return;
         }
+        if (thumbnail_pid == pid) thumbnail_pid = -1;
     }).detach();
+}
+
+void hide_thumbnail() {
+    if (thumbnail_pid > 0) {
+        kill(thumbnail_pid, SIGTERM);
+        waitpid(thumbnail_pid, nullptr, 0);
+        thumbnail_pid = -1;
+    }
 }
 
 size_t visible_count(size_t available_rows, size_t total_items) {
     if (available_rows == 0) return 0;
     return std::min(available_rows, total_items);
-}
-
-bool is_subscribed(const std::string &url, const std::string &name) {
-    return std::any_of(subs.begin(), subs.end(), [&](const Channel &c){ return c.url == url || c.name == name; });
 }

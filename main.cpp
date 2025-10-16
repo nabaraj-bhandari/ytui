@@ -24,6 +24,7 @@ int main() {
         napms(16);
     }
     save_history();
+    hide_thumbnail();
     cleanup_ui();
     return 0;
 }

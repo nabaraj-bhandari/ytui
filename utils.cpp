@@ -139,6 +139,8 @@ void play(const Video &v) {
     std::string cmd = "setsid mpv ";
     cmd += std::string(MPV_ARGS) + " '" + path + "' </dev/null >/dev/null 2>&1 &";
     system(cmd.c_str());
+    thumbnail_resume_time = time(nullptr) + 8;
+    hide_thumbnail();
     auto it = std::find(history.begin(), history.end(), v);
     if(it != history.end()) {
         Video ex = *it;
@@ -324,6 +326,12 @@ int enqueue_download(const Video &v) {
 }
 
 void show_thumbnail(const Video &v) {
+    if (thumbnail_resume_time > 0) {
+        time_t now = time(nullptr);
+        if (now < thumbnail_resume_time) return;
+        thumbnail_resume_time = 0;
+    }
+
     if (v.id.empty()) return;
 
     std::string url = "https://img.youtube.com/vi/" + v.id + "/mqdefault.jpg";
@@ -371,6 +379,26 @@ void hide_thumbnail() {
         waitpid(thumbnail_pid, nullptr, 0);
         thumbnail_pid = -1;
     }
+}
+
+void preload_thumbnails(const std::vector<Video> &list, size_t start) {
+    if (start >= list.size()) return;
+
+    size_t end = std::min(list.size(), start + static_cast<size_t>(5));
+    std::vector<Video> targets;
+    targets.reserve(end - start);
+    for (size_t i = start; i < end; ++i) {
+        if (!list[i].id.empty()) targets.push_back(list[i]);
+    }
+    if (targets.empty()) return;
+
+    std::thread([targets = std::move(targets)]() {
+        for (const auto &vid : targets) {
+            std::string image_path;
+            std::string url = "https://img.youtube.com/vi/" + vid.id + "/mqdefault.jpg";
+            ensure_thumbnail_cached(vid, url, image_path);
+        }
+    }).detach();
 }
 
 size_t visible_count(size_t available_rows, size_t total_items) {

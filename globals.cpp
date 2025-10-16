@@ -27,4 +27,5 @@ size_t downloads_scroll = 0;
 size_t channel_scroll = 0;
 size_t subs_scroll = 0;
 pid_t thumbnail_pid = -1;
+time_t thumbnail_resume_time = 0;
 

@@ -185,9 +185,11 @@ void enter_channel_view(const std::string &url, const std::vector<Video> *prefet
 
     if(channel_videos.empty()) {
         set_status("No videos found for channel");
+        hide_thumbnail();
     } else {
         set_status("Inside a channel");
         show_thumbnail(channel_videos[sel]);
+        preload_thumbnails(channel_videos, sel + 1);
     }
 }
 

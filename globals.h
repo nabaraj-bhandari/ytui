@@ -35,5 +35,6 @@ extern size_t downloads_scroll;
 extern size_t channel_scroll;
 extern size_t subs_scroll;
 extern pid_t thumbnail_pid;
+extern time_t thumbnail_resume_time;
 
 #endif

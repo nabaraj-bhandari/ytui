@@ -32,7 +32,7 @@ bool is_video_downloaded(const Video &v);
 std::string find_cached_path_by_id(const std::string &id);
 void show_thumbnail(const Video &v);
 void hide_thumbnail();
-void cleanup_thumbnail();
+void preload_thumbnails(const std::vector<Video> &list, size_t start);
 
 // Utility encoding for safe persistence
 std::string esc(const std::string &s);

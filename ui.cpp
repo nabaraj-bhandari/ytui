@@ -460,6 +460,39 @@ bool handle_input() {
         return download_items_cache;
     };
 
+    auto refresh_thumbnail = [&]() {
+        if (focus == HOME) {
+            if (history.empty()) { hide_thumbnail(); return; }
+            if (sel >= history.size()) sel = history.size() - 1;
+            show_thumbnail(history[sel]);
+            preload_thumbnails(history, sel + 1);
+            return;
+        }
+        if (focus == DOWNLOADS) {
+            const auto &items = ensure_download_items();
+            if (items.empty()) { hide_thumbnail(); return; }
+            if (sel >= items.size()) sel = items.size() - 1;
+            show_thumbnail(items[sel]);
+            preload_thumbnails(items, sel + 1);
+            return;
+        }
+        if (focus == RESULTS) {
+            if (res.empty()) { hide_thumbnail(); return; }
+            if (sel >= res.size()) sel = res.size() - 1;
+            show_thumbnail(res[sel]);
+            preload_thumbnails(res, sel + 1);
+            return;
+        }
+        if (focus == CHANNEL) {
+            if (channel_videos.empty()) { hide_thumbnail(); return; }
+            if (sel >= channel_videos.size()) sel = channel_videos.size() - 1;
+            show_thumbnail(channel_videos[sel]);
+            preload_thumbnails(channel_videos, sel + 1);
+            return;
+        }
+        hide_thumbnail();
+    };
+
     const bool search_insert = (focus == SEARCH && insert_mode);
     const bool allow_vim_nav = !search_insert;
 
@@ -490,7 +523,12 @@ bool handle_input() {
                                  const std::function<void()> &onSelect,
                                  const std::function<void()> &onDownload = std::function<void()>()) {
         if (move_selection(list.size())) {
-            if (!list.empty() && sel < list.size()) show_thumbnail(list[sel]);
+            if (!list.empty() && sel < list.size()) {
+                show_thumbnail(list[sel]);
+                preload_thumbnails(list, sel + 1);
+            } else {
+                hide_thumbnail();
+            }
             return true;
         }
         if (navBack && onBack) { onBack(); return true; }
@@ -545,15 +583,12 @@ bool handle_input() {
         if (ch == APP_KEY_SUBS) { set_focus(SUBSCRIPTIONS); return true; }
         if (ch == APP_KEY_DOWNLOADS) {
             set_focus(DOWNLOADS);
-            const auto &items = ensure_download_items();
-            if (!items.empty() && sel < items.size()) show_thumbnail(items[sel]);
-            else hide_thumbnail();
+            refresh_thumbnail();
             return true;
         }
         if (ch == APP_KEY_HOME) {
             set_focus(HOME);
-            if (!history.empty() && sel < history.size()) show_thumbnail(history[sel]);
-            else hide_thumbnail();
+            refresh_thumbnail();
             return true;
         }
         if (ch == APP_KEY_SEARCH) { set_focus(SEARCH); return true; }
@@ -600,8 +635,7 @@ bool handle_input() {
                         res = fetch_videos(query, MAX_LIST_ITEMS);
                         add_search_hist(query);
                         set_focus(RESULTS);
-                        if (!res.empty() && sel < res.size()) show_thumbnail(res[sel]);
-                        else hide_thumbnail();
+                        refresh_thumbnail();
                     }
                 } else {
                     insert_mode = true;
@@ -617,8 +651,7 @@ bool handle_input() {
                     res = fetch_videos(query, MAX_LIST_ITEMS);
                     add_search_hist(query);
                     set_focus(RESULTS);
-                    if (!res.empty() && sel < res.size()) show_thumbnail(res[sel]);
-                    else hide_thumbnail();
+                    refresh_thumbnail();
                 } else {
                     insert_mode = false;
                     search_hist_idx = -1;
@@ -656,7 +689,8 @@ bool handle_input() {
                 case HOME: default: focus = (target==HOME?HOME:target); sel = (target==HOME?0:selection); break;
             }
             scroll_for_focus(focus) = 0;
-            if (!focus_has_video_content(focus)) hide_thumbnail();
+            if (focus_has_video_content(focus)) refresh_thumbnail();
+            else hide_thumbnail();
         };
 
         const std::vector<Video> *list = nullptr;
@@ -675,7 +709,7 @@ bool handle_input() {
         } else if (focus == DOWNLOADS) {
             const auto &items = ensure_download_items();
             list = &items;
-            onBack = [&]{ set_focus(HOME); };
+            onBack = [&]{ set_focus(HOME); refresh_thumbnail(); };
             onSelect = [&]{ play(items[sel]); };
             onDownload = [&]{ enqueue_download(items[sel]); };
         } else if (focus == HOME) {
@@ -685,7 +719,7 @@ bool handle_input() {
             onDownload = [&]{ enqueue_download(history[sel]); };
         } else if (focus == SUBSCRIPTIONS) {
             if (subs.empty()) return true;
-            if (handle_list_navigation(subs.size(), [&]{ set_focus(HOME); }, [&]{ enter_subscription_channel(sel); })) return true;
+            if (handle_list_navigation(subs.size(), [&]{ set_focus(HOME); refresh_thumbnail(); }, [&]{ enter_subscription_channel(sel); })) return true;
             list = nullptr;
         }
 

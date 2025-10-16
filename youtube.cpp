@@ -183,8 +183,12 @@ void enter_channel_view(const std::string &url, const std::vector<Video> *prefet
     sel = 0;
     channel_scroll = 0;
 
-    if(channel_videos.empty()) set_status("No videos found for channel");
-    else set_status("Inside a channel");
+    if(channel_videos.empty()) {
+        set_status("No videos found for channel");
+    } else {
+        set_status("Inside a channel");
+        show_thumbnail(channel_videos[sel]);
+    }
 }
 
 std::string resolve_channel_url_for_video(const std::string &video_id) {

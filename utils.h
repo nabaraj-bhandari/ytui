@@ -31,6 +31,7 @@ std::vector<Video> collect_download_items(const std::vector<Video> &cached);
 void update_download_statuses(const std::vector<Video> &cached);
 bool is_video_downloaded(const Video &v);
 std::string find_cached_path_by_id(const std::string &id);
+void show_thumbnail(const Video &v);
 
 // Utility encoding for safe persistence
 std::string esc(const std::string &s);

@@ -8,15 +8,23 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <dirent.h>
 #include <fstream>
+#include <signal.h>
 #include <string>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <thread>
+#include <unistd.h>
 #include <utility>
+
+bool file_exists(const std::string &path);
 
 namespace {
 
@@ -26,6 +34,50 @@ constexpr size_t YT_ID_LENGTH = 11;
 bool is_supported_extension(const std::string &ext) {
     return std::any_of(VIDEO_EXTENSIONS.begin(), VIDEO_EXTENSIONS.end(),
                        [&](const char *candidate) { return ext == candidate; });
+}
+
+enum class ThumbFetchResult { Ok, CurlMissing, Failed };
+
+ThumbFetchResult ensure_thumbnail_cached(const Video &v, const std::string &url, std::string &path_out) {
+    std::string dest = THUMBNAIL_CACHE + "/" + v.id + ".jpg";
+    if (file_exists(dest)) {
+        path_out = dest;
+        return ThumbFetchResult::Ok;
+    }
+
+    mkdir(THUMBNAIL_CACHE.c_str(), 0755);
+
+    pid_t pid = fork();
+    if (pid < 0) return ThumbFetchResult::Failed;
+
+    if (pid == 0) {
+        execlp("curl", "curl", "-sS", "-L", "-o", dest.c_str(), url.c_str(), static_cast<char *>(nullptr));
+        _exit(errno == ENOENT ? 127 : 126);
+    }
+
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) {
+        unlink(dest.c_str());
+        return ThumbFetchResult::Failed;
+    }
+
+    if (!WIFEXITED(status)) {
+        unlink(dest.c_str());
+        return ThumbFetchResult::Failed;
+    }
+
+    int code = WEXITSTATUS(status);
+    if (code == 127) {
+        unlink(dest.c_str());
+        return ThumbFetchResult::CurlMissing;
+    }
+    if (code != 0) {
+        unlink(dest.c_str());
+        return ThumbFetchResult::Failed;
+    }
+
+    path_out = dest;
+    return ThumbFetchResult::Ok;
 }
 
 } // namespace
@@ -64,6 +116,7 @@ void mkdirs() {
     mkdir(CONFIG_DIR.c_str(), 0755);
     mkdir(CACHE_DIR.c_str(), 0755);
     mkdir(VIDEO_CACHE.c_str(), 0755);
+    mkdir(THUMBNAIL_CACHE.c_str(), 0755);
 }
 
 bool file_exists(const std::string &path) {
@@ -275,6 +328,46 @@ int enqueue_download(const Video &v) {
     downloads.insert(downloads.begin(), dl2);
     set_status("Downloading: " + v.title);
     return pid;
+}
+
+void show_thumbnail(const Video &v) {
+    if (thumbnail_pid > 0) {
+        kill(thumbnail_pid, SIGTERM);
+        waitpid(thumbnail_pid, nullptr, 0);
+        thumbnail_pid = -1;
+    }
+
+    if (v.id.empty()) return;
+
+    std::string url = "https://img.youtube.com/vi/" + v.id + "/mqdefault.jpg";
+    std::string image_path;
+    ThumbFetchResult fetch = ensure_thumbnail_cached(v, url, image_path);
+    if (fetch != ThumbFetchResult::Ok) return;
+
+    pid_t pid = fork();
+    if (pid < 0) return;
+
+    if (pid == 0) {
+        execlp("feh", "feh", "--title", "YTUI Thumbnail", image_path.c_str(), static_cast<char *>(nullptr));
+        _exit(127);
+    }
+
+    int status = 0;
+    pid_t result = waitpid(pid, &status, WNOHANG);
+    if (result == pid) return;
+
+    thumbnail_pid = pid;
+
+    std::thread([pid]() {
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        if (thumbnail_pid == pid) {
+            kill(pid, SIGTERM);
+            waitpid(pid, nullptr, 0);
+            thumbnail_pid = -1;
+        } else {
+            waitpid(pid, nullptr, 0);
+        }
+    }).detach();
 }
 
 size_t visible_count(size_t available_rows, size_t total_items) {

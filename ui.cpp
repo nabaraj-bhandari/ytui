@@ -484,7 +484,12 @@ bool handle_input() {
                                  const std::function<void()> &onBack,
                                  const std::function<void()> &onSelect,
                                  const std::function<void()> &onDownload = std::function<void()>()) {
-        if (handle_list_navigation(list.size(), onBack, onSelect)) return true;
+        if (move_selection(list.size())) {
+            if (!list.empty() && sel < list.size()) show_thumbnail(list[sel]);
+            return true;
+        }
+        if (navBack && onBack) { onBack(); return true; }
+        if (navSelect && onSelect && !list.empty() && sel < list.size()) { onSelect(); return true; }
         if (ch == APP_KEY_DOWNLOAD && sel < list.size()) {
             if (onDownload) onDownload();
             else enqueue_download(list[sel]);
@@ -533,8 +538,17 @@ bool handle_input() {
 
     if (!search_insert) {
         if (ch == APP_KEY_SUBS) { set_focus(SUBSCRIPTIONS); return true; }
-        if (ch == APP_KEY_DOWNLOADS) { set_focus(DOWNLOADS); return true; }
-        if (ch == APP_KEY_HOME) { set_focus(HOME); return true; }
+        if (ch == APP_KEY_DOWNLOADS) {
+            set_focus(DOWNLOADS);
+            const auto &items = ensure_download_items();
+            if (!items.empty() && sel < items.size()) show_thumbnail(items[sel]);
+            return true;
+        }
+        if (ch == APP_KEY_HOME) {
+            set_focus(HOME);
+            if (!history.empty() && sel < history.size()) show_thumbnail(history[sel]);
+            return true;
+        }
         if (ch == APP_KEY_SEARCH) { set_focus(SEARCH); return true; }
     }
 
@@ -579,6 +593,7 @@ bool handle_input() {
                         res = fetch_videos(query, MAX_LIST_ITEMS);
                         add_search_hist(query);
                         set_focus(RESULTS);
+                        if (!res.empty() && sel < res.size()) show_thumbnail(res[sel]);
                     }
                 } else {
                     insert_mode = true;
@@ -594,6 +609,7 @@ bool handle_input() {
                     res = fetch_videos(query, MAX_LIST_ITEMS);
                     add_search_hist(query);
                     set_focus(RESULTS);
+                    if (!res.empty() && sel < res.size()) show_thumbnail(res[sel]);
                 } else {
                     insert_mode = false;
                     search_hist_idx = -1;

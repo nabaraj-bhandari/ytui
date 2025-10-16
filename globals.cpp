@@ -1,5 +1,4 @@
-#include "types.h"
-#include <thread>
+#include "globals.h"
 
 // Global state definitions
 std::vector<std::string> search_hist;
@@ -7,7 +6,6 @@ std::vector<Video> res;
 std::vector<Video> history;
 std::vector<Download> downloads;
 std::vector<Channel> subs;
-std::vector<Video> subs_videos;
 std::string query;
 size_t sel = 0;
 std::string status_msg;
@@ -19,9 +17,13 @@ int subs_channel_idx = -1;
 std::vector<std::vector<Video>> subs_cache;
 int search_hist_idx = -1;
 std::vector<Video> channel_videos;
-std::string channel_name;
 std::string channel_url;
 bool channel_return_active = false;
 Focus channel_return_focus = HOME;
 size_t channel_return_sel = 0;
+size_t history_scroll = 0;
+size_t results_scroll = 0;
+size_t downloads_scroll = 0;
+size_t channel_scroll = 0;
+size_t subs_scroll = 0;
 

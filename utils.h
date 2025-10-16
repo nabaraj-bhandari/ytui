@@ -3,14 +3,13 @@
 
 #include <string>
 #include <vector>
+
 #include "types.h"
 
 void mkdirs();
 bool file_exists(const std::string &path);
 void set_status(const std::string &msg);
 
-// Play
-#include "types.h"
 void play(const Video &v);
 
 // Search history (string list)
@@ -26,13 +25,11 @@ void save_history();
 void load_subs();
 void save_subs();
 
-// Scan the VIDEO_CACHE directory and return discovered videos
 std::vector<Video> scan_video_cache();
-
-// Return true if the given video appears in the VIDEO_CACHE (match by id or title)
+std::vector<Video> collect_download_items();
+std::vector<Video> collect_download_items(const std::vector<Video> &cached);
+void update_download_statuses(const std::vector<Video> &cached);
 bool is_video_downloaded(const Video &v);
-
-// Return path to cached file for given video id, or empty string if not present
 std::string find_cached_path_by_id(const std::string &id);
 
 // Utility encoding for safe persistence

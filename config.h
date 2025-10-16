@@ -25,10 +25,8 @@ static const int APP_KEY_HOME = 'a';
 static const int APP_KEY_SEARCH = 's';
 static const int APP_KEY_DOWNLOADS = 'd';
 static const int APP_KEY_SUBS = 'w';
-static const int APP_KEY_DOWN = 'j';
-static const int APP_KEY_UP = 'k';
 
-static const int MAX_LIST_ITEMS = 30;
+static const int MAX_LIST_ITEMS = 100;
 
 #endif
 

@@ -1,38 +1,38 @@
 #include "ui.h"
-#include "config.h"
-#include "types.h"
-#include "youtube.h"
-#include "utils.h"
 
-#include <locale.h>
-#include <ncurses.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#include <ctime>
+#include "config.h"
+#include "globals.h"
+#include "types.h"
+#include "utils.h"
+#include "youtube.h"
+
 #include <algorithm>
+#include <ctime>
 #include <functional>
 #include <iterator>
+#include <locale.h>
+#include <ncurses.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 namespace {
-std::vector<Video> collect_download_items() {
-    std::vector<Video> out;
-    auto cached = scan_video_cache();
-    out.insert(out.end(), cached.begin(), cached.end());
 
-    for (const auto &d : downloads) {
-        if (std::any_of(cached.begin(), cached.end(),
-                        [&](const Video &c) { return c.id == d.v.id; }))
-            continue;
-
-        Video candidate = d.v;
-        candidate.path = VIDEO_CACHE + "/" + candidate.id + ".mkv";
-        out.push_back(candidate);
+size_t &scroll_for_focus(Focus f) {
+    switch (f) {
+        case HOME: return history_scroll;
+        case DOWNLOADS: return downloads_scroll;
+        case SUBSCRIPTIONS: return subs_scroll;
+        case CHANNEL: return channel_scroll;
+        case RESULTS: return results_scroll;
+        default: {
+            static size_t dummy = 0;
+            return dummy;
+        }
     }
-    return out;
 }
 
-void render_status_bar() {
+void render_status_bar(const std::vector<Video> *cached_downloads = nullptr) {
     int h, w;
     getmaxyx(stdscr, h, w);
     int y = h - 1;
@@ -52,8 +52,8 @@ void render_status_bar() {
     std::string info;
     if (focus == DOWNLOADS) {
         int total = 0, active = 0;
-        auto cached = scan_video_cache();
-        total = cached.size();
+        if (cached_downloads) total = static_cast<int>(cached_downloads->size());
+        else total = static_cast<int>(scan_video_cache().size());
         for (const auto &d : downloads)
             if (d.pid > 0) active++;
         info = std::to_string(total) + " files";
@@ -66,16 +66,6 @@ void render_status_bar() {
     }
 }
 
-void update_download_statuses() {
-    auto cached = scan_video_cache();
-    for (auto &d : downloads) {
-        bool found = std::any_of(cached.begin(), cached.end(),
-                                 [&](const Video &c) { return c.id == d.v.id; });
-        d.done = found;
-        if (found) d.pid = 0;
-    }
-}
-
 void remember_channel_origin(Focus target, size_t selection) {
     channel_return_focus = target;
     channel_return_sel = selection;
@@ -84,7 +74,7 @@ void remember_channel_origin(Focus target, size_t selection) {
 
 void render_video_list_section(int y, int h, const std::string &title,
                                const std::vector<Video> &items,
-                               bool active, size_t offset) {
+                               bool active, size_t &offset) {
     int w = getmaxx(stdscr);
     std::string logo = "-=YTUI=-";
     if (active) attron(COLOR_PAIR(1) | A_BOLD);
@@ -95,6 +85,32 @@ void render_video_list_section(int y, int h, const std::string &title,
     attroff(COLOR_PAIR(1) | A_BOLD | A_DIM);
 
     size_t max_display = visible_count((size_t)h, items.size());
+
+    int status_row = getmaxy(stdscr) - 1;
+    int last_row_allowed = status_row - 1;
+    if (last_row_allowed < y + 1) {
+        max_display = 0;
+    } else {
+        size_t room = (size_t)(last_row_allowed - (y + 1) + 1);
+        if (max_display > room) max_display = room;
+    }
+
+    if (active) {
+        if (items.empty()) sel = 0;
+        else if (sel >= items.size()) sel = items.size() - 1;
+    }
+
+    if (items.size() <= max_display) {
+        offset = 0;
+    } else if (max_display > 0) {
+        if (sel < offset) offset = sel;
+        size_t max_offset = items.size() - max_display;
+        if (sel >= offset + max_display) offset = sel - max_display + 1;
+        if (offset > max_offset) offset = max_offset;
+    } else {
+        offset = 0;
+    }
+
     for (size_t i = 0; i < max_display; i++) {
         size_t idx = i + offset;
         if (idx >= items.size()) break;
@@ -114,6 +130,13 @@ void render_video_list_section(int y, int h, const std::string &title,
 
 
         if (selected) attroff(A_REVERSE | A_BOLD);
+    }
+
+    if (max_display > 0 && items.size() > max_display) {
+        int top_row = y + 1;
+        int bottom_row = y + 1 + (int)max_display - 1;
+        if (offset > 0) mvprintw(top_row, w - 2, "^");
+        if (offset + max_display < items.size()) mvprintw(bottom_row, w - 2, "v");
     }
 }
 
@@ -240,8 +263,13 @@ void render_search_view() {
 void render_subscriptions_view(int h, int w) {
     if (subs.empty()) load_subs();
 
-    std::vector<Video> dummy;
-    render_video_list_section(1, h - 4, "SUBSCRIPTIONS", dummy, true, 0);
+    std::string logo = "-=YTUI=-";
+    attron(COLOR_PAIR(1) | A_BOLD);
+    mvprintw(0, (w - (int)logo.length()) / 2, "%s", logo.c_str());
+    std::string title = "SUBSCRIPTIONS";
+    mvprintw(1, 0, "--- %s ", title.c_str());
+    for (int i = (int)title.length() + 5; i < w; ++i) addch('-');
+    attroff(COLOR_PAIR(1) | A_BOLD);
 
     if (subs.empty()) {
         mvprintw(3, 4, "No subscriptions added yet.");
@@ -249,20 +277,43 @@ void render_subscriptions_view(int h, int w) {
     }
 
     size_t display_count = visible_count((size_t)h - 4, subs.size());
+    if (!subs.empty() && sel >= subs.size()) sel = subs.size() - 1;
+    if (subs.empty()) sel = 0;
+
+    if (subs.size() <= display_count) {
+        subs_scroll = 0;
+    } else if (display_count > 0) {
+        if (sel < subs_scroll) subs_scroll = sel;
+        size_t max_offset = subs.size() - display_count;
+        if (sel >= subs_scroll + display_count) subs_scroll = sel - display_count + 1;
+        if (subs_scroll > max_offset) subs_scroll = max_offset;
+    } else {
+        subs_scroll = 0;
+    }
+
+    int row_start = 2;
     for (size_t i = 0; i < display_count; ++i) {
-        bool selch = (sel == i);
+        size_t idx = subs_scroll + i;
+        if (idx >= subs.size()) break;
+
+        bool selch = (sel == idx);
         if (selch) attron(A_REVERSE | A_BOLD);
 
-        std::string name = subs[i].name.empty() ? subs[i].url : subs[i].name;
+        std::string name = subs[idx].name.empty() ? subs[idx].url : subs[idx].name;
         if ((int)name.size() > w - 10)
             name = name.substr(0, w - 13) + "...";
 
-        const bool is_active_channel = (subs_channel_idx == (int)i);
+        const bool is_active_channel = (subs_channel_idx == (int)idx);
         const char marker = is_active_channel ? '>' : ' ';
 
-        mvprintw(2 + i, 2, "%c %2zu. %s", marker, i + 1, name.c_str());
+        mvprintw(row_start + (int)i, 2, "%c %2zu. %s", marker, idx + 1, name.c_str());
 
         if (selch) attroff(A_REVERSE | A_BOLD);
+    }
+
+    if (display_count > 0 && subs.size() > display_count) {
+        if (subs_scroll > 0) mvprintw(row_start, w - 2, "^");
+        if (subs_scroll + display_count < subs.size()) mvprintw(row_start + (int)display_count - 1, w - 2, "v");
     }
 }
 
@@ -311,37 +362,53 @@ void draw() {
     int h, w;
     getmaxyx(stdscr, h, w);
 
-    auto render_videos = [&](const std::string &title, const std::vector<Video> &videos) {
-        render_video_list_section(1, h - 2, title, videos, true, 0);
+    bool cache_initialized = false;
+    std::vector<Video> cached_videos;
+    auto ensure_cache = [&]() -> const std::vector<Video>& {
+        if (!cache_initialized) {
+            cached_videos = scan_video_cache();
+            cache_initialized = true;
+        }
+        return cached_videos;
     };
 
     switch (focus) {
         case HOME: {
-            render_videos("History", history);
+            render_video_list_section(1, h - 2, "HISTORY", history, true, history_scroll);
             break;
         }
         case SEARCH:
             render_search_view();
             break;
         case DOWNLOADS: {
-            auto items = collect_download_items();
-            render_videos("DOWNLOADS", items);
+            const auto &cache = ensure_cache();
+            auto items = collect_download_items(cache);
+            render_video_list_section(1, h - 2, "DOWNLOADS", items, true, downloads_scroll);
             break;
         }
         case SUBSCRIPTIONS:
             render_subscriptions_view(h, w);
             break;
         case RESULTS:
-            render_videos("RESULTS", res);
+            render_video_list_section(1, h - 2, "RESULTS", res, true, results_scroll);
             break;
         case CHANNEL: {
-            render_videos("CHANNEL", channel_videos);
+            render_video_list_section(1, h - 2, "CHANNEL", channel_videos, true, channel_scroll);
             break;
         }
     }
 
-    update_download_statuses();
-    render_status_bar();
+    const std::vector<Video> *status_cache = nullptr;
+    if (!downloads.empty()) {
+        const auto &cache = ensure_cache();
+        update_download_statuses(cache);
+        if (focus == DOWNLOADS) status_cache = &cache;
+    } else if (focus == DOWNLOADS) {
+        const auto &cache = ensure_cache();
+        status_cache = &cache;
+    }
+
+    render_status_bar(status_cache);
 
     refresh();
 }
@@ -364,21 +431,37 @@ bool handle_input() {
         sel = 0;
         channel_return_active = false;
         if (target != CHANNEL) subs_channel_idx = -1;
+        scroll_for_focus(target) = 0;
         reset_search_state();
     };
 
-    bool search_insert = (focus == SEARCH && insert_mode);
-    if (!search_insert) {
-        if (ch == 'j' || ch == 'J') ch = APP_KEY_DOWN;
-        else if (ch == 'k' || ch == 'K') ch = APP_KEY_UP;
-        else if (ch == 'h' || ch == 'H') ch = KEY_LEFT;
-        else if (ch == 'l' || ch == 'L') ch = KEY_RIGHT;
-    }
+    bool cached_files_initialized = false;
+    std::vector<Video> cached_files;
+    auto ensure_cached_files = [&]() -> const std::vector<Video>& {
+        if (!cached_files_initialized) {
+            cached_files = scan_video_cache();
+            cached_files_initialized = true;
+        }
+        return cached_files;
+    };
 
-    const bool navDown = (ch == APP_KEY_DOWN || ch == KEY_DOWN);
-    const bool navUp = (ch == APP_KEY_UP || ch == KEY_UP);
-    const bool navBack = (ch == KEY_LEFT);
-    const bool navSelect = (ch == '\n' || ch == '\r' || ch == KEY_RIGHT);
+    bool download_items_initialized = false;
+    std::vector<Video> download_items_cache;
+    auto ensure_download_items = [&]() -> const std::vector<Video>& {
+        if (!download_items_initialized) {
+            download_items_cache = collect_download_items(ensure_cached_files());
+            download_items_initialized = true;
+        }
+        return download_items_cache;
+    };
+
+    const bool search_insert = (focus == SEARCH && insert_mode);
+    const bool allow_vim_nav = !search_insert;
+
+    const bool navDown = (ch == KEY_DOWN) || (allow_vim_nav && (ch == 'j' || ch == 'J'));
+    const bool navUp = (ch == KEY_UP) || (allow_vim_nav && (ch == 'k' || ch == 'K'));
+    const bool navBack = allow_vim_nav && (ch == 'h' || ch == 'H');
+    const bool navSelect = (ch == '\n' || ch == '\r') || (allow_vim_nav && (ch == 'l' || ch == 'L'));
 
     auto move_selection = [&](size_t size) {
         if (size == 0) { sel = 0; return false; }
@@ -410,15 +493,13 @@ bool handle_input() {
         return false;
     };
 
-    if (focus == HOME && ch == KEY_RIGHT) { set_focus(SEARCH); return true; }
-
     if (focus != SEARCH) {
         if (ch == APP_KEY_CHANNEL) {
             if (focus == RESULTS && sel < res.size()) {
                 remember_channel_origin(RESULTS, sel);
                 show_channel_for(res[sel]);
             } else if (focus == DOWNLOADS) {
-                auto items = collect_download_items();
+                const auto &items = ensure_download_items();
                 if (sel < items.size()) {
                     remember_channel_origin(DOWNLOADS, sel);
                     show_channel_for(items[sel]);
@@ -444,7 +525,7 @@ bool handle_input() {
                     subs_cache[subs_channel_idx] = channel_videos;
                 }
                 if (channel_videos.empty()) set_status("No videos found for channel");
-                else set_status("Refreshed channel: " + channel_name);
+                else set_status("Refreshed channel");
                 return true;
             }
         }
@@ -542,16 +623,16 @@ bool handle_input() {
                 case RESULTS: focus = RESULTS; sel = res.empty() ? 0 : clamp(res.size()); break;
                 case DOWNLOADS: {
                     focus = DOWNLOADS;
-                    auto items = collect_download_items();
+                    const auto &items = ensure_download_items();
                     sel = items.empty() ? 0 : clamp(items.size());
                     break;
                 }
                 case SEARCH: focus = SEARCH; sel = 0; break;
                 case HOME: default: focus = (target==HOME?HOME:target); sel = (target==HOME?0:selection); break;
             }
+            scroll_for_focus(focus) = 0;
         };
 
-        std::vector<Video> temp_items;
         const std::vector<Video> *list = nullptr;
         std::function<void()> onBack, onSelect, onDownload;
 
@@ -566,11 +647,11 @@ bool handle_input() {
             onSelect = [&]{ play(channel_videos[sel]); };
             onDownload = [&]{ enqueue_download(channel_videos[sel]); };
         } else if (focus == DOWNLOADS) {
-            temp_items = collect_download_items();
-            list = &temp_items;
+            const auto &items = ensure_download_items();
+            list = &items;
             onBack = [&]{ set_focus(HOME); };
-            onSelect = [&]{ play((*list)[sel]); };
-            onDownload = [&]{ enqueue_download((*list)[sel]); };
+            onSelect = [&]{ play(items[sel]); };
+            onDownload = [&]{ enqueue_download(items[sel]); };
         } else if (focus == HOME) {
             if (history.empty()) return true;
             list = &history;

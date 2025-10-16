@@ -1,24 +1,62 @@
-#include <algorithm>
-#include <ctime>
-#include <cstring>
-#include <cstdlib>
-#include <dirent.h>
-#include <fstream>
-#include <sys/stat.h>
-#include <string>
-#include <cctype>
-#include <cstdio>
-
 #include "utils.h"
+
 #include "config.h"
+#include "globals.h"
 #include "types.h"
 #include "youtube.h"
 
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#include <dirent.h>
+#include <fstream>
+#include <string>
+#include <sys/stat.h>
+#include <utility>
+
+namespace {
+
+constexpr std::array<const char *, 2> VIDEO_EXTENSIONS = {"mkv", "mp4"};
+constexpr size_t YT_ID_LENGTH = 11;
+
+bool is_supported_extension(const std::string &ext) {
+    return std::any_of(VIDEO_EXTENSIONS.begin(), VIDEO_EXTENSIONS.end(),
+                       [&](const char *candidate) { return ext == candidate; });
+}
+
+} // namespace
+
 std::string find_cached_path_by_id(const std::string &id) {
-    auto cached = scan_video_cache();
-    for(const auto &v : cached) {
-        if(v.id == id) return v.path;
+    DIR *d = opendir(VIDEO_CACHE.c_str());
+    if (!d) return std::string();
+
+    struct dirent *ent;
+    while ((ent = readdir(d)) != nullptr) {
+        if (ent->d_type != DT_REG) continue;
+
+        std::string name(ent->d_name);
+        size_t dot = name.rfind('.');
+        if (dot == std::string::npos) continue;
+
+        std::string ext = name.substr(dot + 1);
+        if (!is_supported_extension(ext)) continue;
+
+        std::string base = name.substr(0, dot);
+        if (base.size() >= id.size() &&
+            base.compare(base.size() - id.size(), id.size(), id) == 0) {
+            std::string path = VIDEO_CACHE;
+            path += '/';
+            path += name;
+            closedir(d);
+            return path;
+        }
     }
+
+    closedir(d);
     return std::string();
 }
 
@@ -144,23 +182,24 @@ std::vector<Video> scan_video_cache() {
         if (dot == std::string::npos) continue;
 
         std::string ext = name.substr(dot + 1);
-        if (ext != "mkv" && ext != "mp4") continue;
+        if (!is_supported_extension(ext)) continue;
 
         std::string base = name.substr(0, dot);
         Video v;
-        v.path = VIDEO_CACHE + "/" + name;
+        std::string path = VIDEO_CACHE;
+        path += '/';
+        path += name;
+        v.path = std::move(path);
 
-        // Expect filename format: <title><id> where id is 11 chars at the end
-        if (base.size() >= 11) {
-            v.id = base.substr(base.size() - 11);
-            v.title = base.substr(0, base.size() - 11);
+        if (base.size() >= YT_ID_LENGTH) {
+            v.id = base.substr(base.size() - YT_ID_LENGTH);
+            v.title = base.substr(0, base.size() - YT_ID_LENGTH);
         } else {
-            // fallback: use whole base as id
             v.id = base;
             v.title = base;
         }
 
-        out.push_back(v);
+        out.push_back(std::move(v));
     }
 
     closedir(d);
@@ -169,11 +208,41 @@ std::vector<Video> scan_video_cache() {
 }
 
 bool is_video_downloaded(const Video &v) {
-    auto cached = scan_video_cache();
-    for(const auto &c : cached) {
-        if(c.id == v.id) return true;
+    return !find_cached_path_by_id(v.id).empty();
+}
+
+std::vector<Video> collect_download_items(const std::vector<Video> &cached) {
+    std::vector<Video> out;
+    out.reserve(cached.size() + downloads.size());
+    out.insert(out.end(), cached.begin(), cached.end());
+
+    for (const auto &d : downloads) {
+        const bool already_cached = std::any_of(
+            cached.begin(), cached.end(),
+            [&](const Video &c) { return c.id == d.v.id; });
+        if (already_cached) continue;
+
+        Video candidate = d.v;
+        candidate.path = VIDEO_CACHE + "/" + candidate.id + ".mkv";
+        out.push_back(std::move(candidate));
     }
-    return false;
+
+    return out;
+}
+
+std::vector<Video> collect_download_items() {
+    auto cached = scan_video_cache();
+    return collect_download_items(cached);
+}
+
+void update_download_statuses(const std::vector<Video> &cached) {
+    for (auto &d : downloads) {
+        const bool found = std::any_of(
+            cached.begin(), cached.end(),
+            [&](const Video &c) { return c.id == d.v.id; });
+        d.done = found;
+        if (found) d.pid = 0;
+    }
 }
 
 std::string esc(const std::string &s) {
@@ -210,9 +279,7 @@ int enqueue_download(const Video &v) {
 
 size_t visible_count(size_t available_rows, size_t total_items) {
     if (available_rows == 0) return 0;
-    size_t cap = (size_t)MAX_LIST_ITEMS;
-    size_t rows = std::min(available_rows, cap);
-    return std::min(rows, total_items);
+    return std::min(available_rows, total_items);
 }
 
 bool is_subscribed(const std::string &url, const std::string &name) {

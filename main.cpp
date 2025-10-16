@@ -1,13 +1,15 @@
-#include <ncurses.h>
-#include <cstdlib>
-#include <unistd.h>
+#include <csignal>
 #include <cstdio>
-#include <signal.h>
+#include <cstdlib>
 #include <ctime>
+#include <ncurses.h>
+#include <unistd.h>
+
 #include "config.h"
+#include "globals.h"
 #include "types.h"
-#include "utils.h"
 #include "ui.h"
+#include "utils.h"
 
 int main() {
     mkdirs();

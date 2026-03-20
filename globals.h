@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <ctime>
 #include <string>
-#include <sys/types.h>
 #include <vector>
 
 #include "types.h"
@@ -34,7 +33,7 @@ extern size_t results_scroll;
 extern size_t downloads_scroll;
 extern size_t channel_scroll;
 extern size_t subs_scroll;
-extern pid_t thumbnail_pid;
+extern bool thumbnail_shown;       // true while a thumbnail is active
 extern time_t thumbnail_resume_time;
 
 #endif

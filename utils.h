@@ -7,13 +7,14 @@
 #include "types.h"
 
 void mkdirs();
+void load_search_hist();
+
 bool file_exists(const std::string &path);
 void set_status(const std::string &msg);
 
 void play(const Video &v);
 
 // Search history (string list)
-void load_search_hist();
 void save_search_hist();
 void add_search_hist(const std::string &s);
 
@@ -23,6 +24,8 @@ void save_history();
 
 // Subscriptions
 void load_subs();
+void save_subs();
+void toggle_subscription(const Video &v);
 
 std::vector<Video> scan_video_cache();
 std::vector<Video> collect_download_items();
@@ -32,6 +35,7 @@ bool is_video_downloaded(const Video &v);
 std::string find_cached_path_by_id(const std::string &id);
 void show_thumbnail(const Video &v);
 void hide_thumbnail();
+void redraw_thumbnail(); // call after ncurses refresh() each frame
 void preload_thumbnails(const std::vector<Video> &list, size_t start);
 
 // Utility encoding for safe persistence
